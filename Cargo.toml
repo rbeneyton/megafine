@@ -1,6 +1,17 @@
 [package]
 name = "megafine"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
+rust-version = "1.95.0"
+authors = ["Richard Beneyton <richard.beneyton@gmail.com>"]
+# mandatory fields
+license = "GPL-3.0-or-later"
+description = "A multithreaded command-line benchmarking tool"
+homepage = "https://github.com/rbeneyton/megafine"
+repository = "https://github.com/rbeneyton/megafine"
+readme = "README.md"
+# optional fields
+keywords = ["tuning", "benchmarking", "optimization", "multithreaded"]
+categories = ["command-line-utilities", "development-tools::profiling", "concurrency"]
 
 [dependencies]
