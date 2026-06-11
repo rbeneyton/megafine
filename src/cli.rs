@@ -60,4 +60,13 @@ pub struct Cli {
     /// allowed CPUs are partitioned across the jobs so they cannot contend.
     #[arg(long)]
     pub no_pin: bool,
+
+    /// Book NUM CPUs (lowest ids) for megafine's own threads.
+    #[arg(
+        long,
+        value_name = "NUM",
+        default_value_t = 0,
+        conflicts_with = "no_pin"
+    )]
+    pub pin_reserved: usize,
 }

@@ -22,6 +22,8 @@ pub struct Options {
     pub calibrate: bool,
     /// Pin each concurrent job to its own disjoint subset of the allowed CPUs.
     pub pin: bool,
+    /// CPUs booked for megafine's own threads, excluded from the workers' partition.
+    pub pin_reserved: usize,
 }
 
 fn all_cores() -> usize {
@@ -81,6 +83,7 @@ impl Options {
             region: cli.region,
             calibrate: !cli.region && !cli.no_calibrate,
             pin: !cli.no_pin,
+            pin_reserved: cli.pin_reserved,
         })
     }
 }

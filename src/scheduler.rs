@@ -205,13 +205,16 @@ pub fn run_benchmarks(
     // each other's timings. Empty when pinning is off; indexed by worker id.
     let groups = if options.pin {
         let cpus = allowed_cpus()?;
-        if jobs > cpus.len() {
+        if jobs > cpus.len().saturating_sub(options.pin_reserved) {
             bail!(
-                "cannot pin {jobs} jobs to {} available CPU(s); reduce --jobs or pass --no-pin",
-                cpus.len()
+                "cannot pin {jobs} jobs to {} available CPU(s) ({} allowed, {} reserved); \
+                 reduce --jobs/--pin-reserved or pass --no-pin",
+                cpus.len().saturating_sub(options.pin_reserved),
+                cpus.len(),
+                options.pin_reserved,
             );
         }
-        let (reserved, groups) = partition(&cpus, jobs);
+        let (reserved, groups) = partition(&cpus, jobs, options.pin_reserved);
         debug!(?groups, "pinned workers to CPUs");
         if !reserved.is_empty() {
             match pin_thread(&reserved) {
