@@ -10,9 +10,9 @@ mod stats;
 
 use std::io::IsTerminal;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
 use tracing_subscriber::EnvFilter;
@@ -36,11 +36,6 @@ fn main() -> Result<()> {
 
     let options = Options::from_cli(&cli)?;
     let interrupted = Arc::new(AtomicBool::new(false));
-    {
-        let interrupted = interrupted.clone();
-        ctrlc::set_handler(move || interrupted.store(true, Ordering::SeqCst))
-            .context("failed to install Ctrl-C handler")?;
-    }
 
     let commands = command::from_cli(&cli);
     let results = scheduler::run_benchmarks(commands, &options, interrupted)?;

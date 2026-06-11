@@ -211,13 +211,26 @@ pub fn run_benchmarks(
                 cpus.len()
             );
         }
-        let groups = partition(&cpus, jobs);
+        let (reserved, groups) = partition(&cpus, jobs);
         debug!(?groups, "pinned workers to CPUs");
+        if !reserved.is_empty() {
+            match pin_thread(&reserved) {
+                Err(e) => warn!(error = %e, "could not pin main/display threads to reserved CPUs"),
+                Ok(()) => debug!(?reserved, "pinned main/display threads to reserved CPUs"),
+            }
+        }
         groups
     } else {
         Vec::new()
     };
     let groups = &groups;
+
+    // Installed after the main thread is pinned, so the handler is also isolated
+    {
+        let interrupted = interrupted.clone();
+        ctrlc::set_handler(move || interrupted.store(true, Ordering::SeqCst))
+            .context("failed to install Ctrl-C handler")?;
+    }
 
     let command_labels: Vec<String> = commands.iter().map(|c| c.label().to_string()).collect();
 

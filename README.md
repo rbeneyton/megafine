@@ -162,6 +162,8 @@ apply), or if `--no-calibrate` option is used.
 
 ### [Unreleased]
 
+- [x] Pin the main, display and Ctrl-C handler threads to the leftover CPUs.
+
 ### [0.1.0] 2026-06-05
 
 - [x] Concurrent multithreaded execution with a worker pool and run-level

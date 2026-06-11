@@ -128,15 +128,17 @@ pub fn allowed_cpus() -> Result<Vec<usize>> {
 /// Split `cpus` into `jobs` contiguous groups of equal size, so every worker has
 /// the same CPU budget and timings stay comparable. Any leftover CPUs (when
 /// `cpus.len()` isn't a multiple of `jobs`) are set aside from the low end, since
-/// CPU 0 tends to carry OS/IRQ work. Callers guarantee `jobs <= cpus.len()`, so
-/// every group is non-empty.
-pub fn partition(cpus: &[usize], jobs: usize) -> Vec<Vec<usize>> {
+/// CPU 0 tends to carry OS/IRQ work, and returned first so orchestration threads
+/// can be parked there. Callers guarantee `jobs <= cpus.len()`, so every group is
+/// non-empty.
+pub fn partition(cpus: &[usize], jobs: usize) -> (Vec<usize>, Vec<Vec<usize>>) {
     let per_worker = cpus.len() / jobs;
     let leftover = cpus.len() % jobs;
-    cpus[leftover..]
+    let groups = cpus[leftover..]
         .chunks_exact(per_worker)
         .map(<[usize]>::to_vec)
-        .collect()
+        .collect();
+    (cpus[..leftover].to_vec(), groups)
 }
 
 pub fn pin_thread(cpus: &[usize]) -> Result<()> {
