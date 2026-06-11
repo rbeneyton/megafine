@@ -26,7 +26,7 @@ pub struct Options {
     pub pin_reserved: usize,
 }
 
-fn all_cores() -> usize {
+pub fn all_cores() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.into())
         .unwrap_or(1)
@@ -35,7 +35,17 @@ fn all_cores() -> usize {
 impl Options {
     pub fn from_cli(cli: &Cli) -> Result<Self> {
         let jobs = match cli.jobs {
-            None | Some(0) => all_cores(),
+            None | Some(0) => {
+                let cores = all_cores();
+                if cores <= cli.pin_reserved {
+                    bail!(
+                        "--pin-reserved {} leaves no CPU for jobs ({cores} available); \
+                         reduce it or set --jobs explicitly",
+                        cli.pin_reserved
+                    );
+                }
+                cores - cli.pin_reserved
+            }
             Some(n) => n,
         };
 

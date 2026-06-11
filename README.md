@@ -20,7 +20,8 @@ Ctrl-C, at which point it stops and prints the statistics collected so far:
 megafine -j 2 'sleep 0.1' 'sleep 0.15'   # runs until Ctrl-C
 ```
 
-Without `-j/--jobs`, megafine uses all available cores.
+Without `-j/--jobs`, megafine uses all available cores (minus the
+`--pin-reserved` ones, if any).
 
 You can pass commands via your shell as expected, here 8 sleep commands via
 fish:
@@ -165,6 +166,9 @@ apply), or if `--no-calibrate` option is used.
 - [x] Pin the main, display and Ctrl-C handler threads to the leftover CPUs.
 - [x] Add `--pin-reserved NUM` to book NUM CPUs for megafine's own threads when
   no leftover exists.
+- [x] Default `-j/--jobs` is the available CPUs minus `--pin-reserved`, and
+  `--help` shows the current CPU count; `-j` now requires a value (`0` = auto,
+  the bare `-j` form is gone)
 
 ### [0.1.0] 2026-06-05
 

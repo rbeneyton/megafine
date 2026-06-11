@@ -11,8 +11,16 @@ pub struct Cli {
     #[arg(required = true, num_args = 1.., value_name = "command")]
     pub commands: Vec<String>,
 
-    /// Run JOBS command invocations simultaneously (no value: use all cores).
-    #[arg(short = 'j', long, value_name = "JOBS", num_args = 0..=1, default_missing_value = "0")]
+    #[arg(
+        short = 'j',
+        long,
+        value_name = "JOBS",
+        help = format!(
+            "Run JOBS command invocations simultaneously (0: auto) \
+             [default: available CPUs ({}) minus --pin-reserved]",
+            crate::options::all_cores()
+        )
+    )]
     pub jobs: Option<usize>,
 
     /// Perform NUM warmup runs before the actual benchmark.
