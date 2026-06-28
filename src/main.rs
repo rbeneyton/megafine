@@ -39,24 +39,33 @@ fn main() -> Result<()> {
 
     let commands = command::from_cli(&cli);
     let results = scheduler::run_benchmarks(commands, &options, interrupted)?;
+    // The reference command may have produced no measurements (e.g. Ctrl-C left
+    // fewer results than commands); bail before compute() indexes out of range.
+    if !results.is_empty() && options.reference >= results.len() {
+        bail!(
+            "--reference {} has no measurements (only {} command(s) produced results)",
+            options.reference + 1,
+            results.len()
+        );
+    }
     if options.raw {
-        print_raw(&results)?;
+        print_raw(&results, options.reference)?;
     } else {
         print_results(&results, &options);
-        print_ranks(&results);
+        print_ranks(&results, options.reference);
     }
 
     Ok(())
 }
 
-/// Print one ratio per line (command order, reference = first command), and
-/// nothing else, so stdout can be consumed directly by scripts.
-fn print_raw(results: &[BenchmarkResult]) -> Result<()> {
+/// Print one ratio per line (command order, relative to the `reference`-th
+/// command), and nothing else, so stdout can be consumed directly by scripts.
+fn print_raw(results: &[BenchmarkResult], reference: usize) -> Result<()> {
     if results.len() < 2 {
         bail!("--raw needs measurements for at least 2 commands (run interrupted too early?)");
     }
-    let relative =
-        compute(results).context("could not compute relative speed (a benchmark time is zero)")?;
+    let relative = compute(results, reference)
+        .context("could not compute relative speed (a benchmark time is zero)")?;
     for item in &relative {
         println!("{:.6}", item.ratio);
     }
@@ -141,12 +150,12 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
     }
 }
 
-fn print_ranks(results: &[BenchmarkResult]) {
+fn print_ranks(results: &[BenchmarkResult], reference: usize) {
     if results.len() < 2 {
         return;
     }
 
-    let Some(relative) = compute(results) else {
+    let Some(relative) = compute(results, reference) else {
         eprintln!(
             "{}: could not compute relative speed (a benchmark time is zero)",
             "Note".red()

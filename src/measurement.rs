@@ -40,16 +40,17 @@ pub struct NormBenchmark<'a> {
     pub is_reference: bool,
 }
 
-/// Compare every result against the first one (the reference). Returns `None` if
-/// the reference mean time is zero (relative speed would be meaningless).
-pub fn compute(results: &[BenchmarkResult]) -> Option<Vec<NormBenchmark<'_>>> {
+/// Compare every result against the `reference`-th one. Returns `None` if the
+/// reference mean time is zero (relative speed would be meaningless). The caller
+/// guarantees `reference < results.len()`.
+pub fn compute(results: &[BenchmarkResult], reference: usize) -> Option<Vec<NormBenchmark<'_>>> {
     // Each command's wall-clock (mean, stddev), computed once.
     let summaries: Vec<(f64, Option<f64>)> = results
         .iter()
         .map(|r| stats::mean_stddev(&r.times(|x| x.wall_clock)))
         .collect();
 
-    let (ref_mean, ref_stddev) = *summaries.first()?;
+    let (ref_mean, ref_stddev) = *summaries.get(reference)?;
     if ref_mean == 0.0 {
         return None;
     }
@@ -76,7 +77,7 @@ pub fn compute(results: &[BenchmarkResult]) -> Option<Vec<NormBenchmark<'_>>> {
                 mean,
                 ratio,
                 stddev,
-                is_reference: idx == 0,
+                is_reference: idx == reference,
             }
         })
         .collect();

@@ -70,9 +70,14 @@ pub struct Cli {
     pub no_pin: bool,
 
     /// Print only the relative-speed ratios (one per line, command order,
-    /// reference = first command) on stdout, for scripts.
+    /// reference = first command or --reference) on stdout, for scripts.
     #[arg(long)]
     pub raw: bool,
+
+    /// Use the IDX-th command (1-based) as the relative-speed baseline
+    /// [default: the first command].
+    #[arg(long, value_name = "IDX")]
+    pub reference: Option<usize>,
 
     /// Book NUM CPUs (lowest ids) for megafine's own threads.
     #[arg(

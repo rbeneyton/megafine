@@ -26,6 +26,8 @@ pub struct Options {
     pub pin_reserved: usize,
     /// Print only the relative-speed ratios on stdout.
     pub raw: bool,
+    /// 0-based index of the command used as the relative-speed baseline.
+    pub reference: usize,
 }
 
 pub fn all_cores() -> usize {
@@ -87,6 +89,15 @@ impl Options {
             );
         }
 
+        let reference = match cli.reference {
+            None => 0,
+            Some(0) => bail!("--reference must be at least 1 (1-based command index)"),
+            Some(n) if n > cli.commands.len() => {
+                bail!("--reference {n} out of range (1..={})", cli.commands.len())
+            }
+            Some(n) => n - 1,
+        };
+
         Ok(Options {
             jobs,
             warmup: cli.warmup,
@@ -101,6 +112,7 @@ impl Options {
             pin: !cli.no_pin,
             pin_reserved: cli.pin_reserved,
             raw: cli.raw,
+            reference,
         })
     }
 }

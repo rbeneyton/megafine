@@ -133,14 +133,18 @@ Notes:
 ### Raw output
 
 `--raw` prints only the relative-speed ratios on stdout, one per line in
-command order (reference = first command = `1.000000`), for scripts or AI
-skill usage. The live display goes to stderr, so stdout can be piped directly:
+command order (the reference command = `1.000000`), for scripts or AI skill
+usage. The live display goes to stderr, so stdout can be piped directly:
 
 ```sh
 megafine --raw -r 10 'sleep 0.1' 'sleep 0.15'
 1.000000
 1.500372
 ```
+
+The baseline is the first command by default; `--reference IDX` picks the
+IDX-th command (1-based, matching the `Benchmark N:` numbering) instead, both
+here and in the normal ranking output.
 
 ### Measurement floor
 
@@ -182,6 +186,8 @@ apply), or if `--no-calibrate` option is used.
   the bare `-j` form is gone)
 - [x] `--raw` mode printing only the relative-speed ratios on stdout, for
   scripts or AI skill usage
+- [x] `--reference IDX` to pick the relative-speed baseline (1-based command
+  index; default: the first command)
 
 ### [0.1.0] 2026-06-05
 
