@@ -56,7 +56,7 @@ pub struct Cli {
     pub time_unit: Option<String>,
 
     /// Measure only the region the command brackets with megafine_start() and
-    /// megafine_stop() (see instrument/megafine.[h|rs]).
+    /// megafine_stop() (see instrument/megafine.[h|rs|py]).
     #[arg(short = 'R', long)]
     pub region: bool,
 
