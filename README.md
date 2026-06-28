@@ -130,6 +130,18 @@ Notes:
 - Keep instrumentation coarse (events buffer until the run ends).
 - The region is assumed single-threaded / non-overlapping.
 
+### Raw output
+
+`--raw` prints only the relative-speed ratios on stdout, one per line in
+command order (reference = first command = `1.000000`), for scripts or AI
+skill usage. The live display goes to stderr, so stdout can be piped directly:
+
+```sh
+megafine --raw -r 10 'sleep 0.1' 'sleep 0.15'
+1.000000
+1.500372
+```
+
 ### Measurement floor
 
 megafine spawns commands with `posix_spawn` (vfork), so both the wall-clock and
@@ -154,7 +166,6 @@ apply), or if `--no-calibrate` option is used.
   inside same process or subtle timings 
 - [ ] pretty progress bars when -r is specified (low priority)
 - [ ] add an estimated end time when -r is specified
-- [ ] --raw output format for scripting, dumping all measurements or final ratios
 - [ ] allow to define a target stddev (ie. run until you've reached ±1%)
 - [ ] allow to force a pattern-defined scheduling (strict round robin per worker, …)
 - [ ] add tests, in case of many features 
@@ -169,6 +180,8 @@ apply), or if `--no-calibrate` option is used.
 - [x] Default `-j/--jobs` is the available CPUs minus `--pin-reserved`, and
   `--help` shows the current CPU count; `-j` now requires a value (`0` = auto,
   the bare `-j` form is gone)
+- [x] `--raw` mode printing only the relative-speed ratios on stdout, for
+  scripts or AI skill usage
 
 ### [0.1.0] 2026-06-05
 

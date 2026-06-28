@@ -24,6 +24,8 @@ pub struct Options {
     pub pin: bool,
     /// CPUs booked for megafine's own threads, excluded from the workers' partition.
     pub pin_reserved: usize,
+    /// Print only the relative-speed ratios on stdout.
+    pub raw: bool,
 }
 
 pub fn all_cores() -> usize {
@@ -73,6 +75,10 @@ impl Options {
             bail!("--runs must be at least 1");
         }
 
+        if cli.raw && cli.commands.len() < 2 {
+            bail!("--raw needs at least 2 commands (it prints relative-speed ratios)");
+        }
+
         if cli.command_name.len() > cli.commands.len() {
             bail!(
                 "got {} command names but only {} command(s)",
@@ -94,6 +100,7 @@ impl Options {
             calibrate: !cli.region && !cli.no_calibrate,
             pin: !cli.no_pin,
             pin_reserved: cli.pin_reserved,
+            raw: cli.raw,
         })
     }
 }

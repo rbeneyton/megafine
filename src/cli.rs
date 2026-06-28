@@ -69,6 +69,11 @@ pub struct Cli {
     #[arg(long)]
     pub no_pin: bool,
 
+    /// Print only the relative-speed ratios (one per line, command order,
+    /// reference = first command) on stdout, for scripts.
+    #[arg(long)]
+    pub raw: bool,
+
     /// Book NUM CPUs (lowest ids) for megafine's own threads.
     #[arg(
         long,

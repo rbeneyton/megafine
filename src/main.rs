@@ -12,7 +12,7 @@ use std::io::IsTerminal;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use colored::Colorize;
 use tracing_subscriber::EnvFilter;
@@ -39,9 +39,27 @@ fn main() -> Result<()> {
 
     let commands = command::from_cli(&cli);
     let results = scheduler::run_benchmarks(commands, &options, interrupted)?;
-    print_results(&results, &options);
-    print_ranks(&results);
+    if options.raw {
+        print_raw(&results)?;
+    } else {
+        print_results(&results, &options);
+        print_ranks(&results);
+    }
 
+    Ok(())
+}
+
+/// Print one ratio per line (command order, reference = first command), and
+/// nothing else, so stdout can be consumed directly by scripts.
+fn print_raw(results: &[BenchmarkResult]) -> Result<()> {
+    if results.len() < 2 {
+        bail!("--raw needs measurements for at least 2 commands (run interrupted too early?)");
+    }
+    let relative =
+        compute(results).context("could not compute relative speed (a benchmark time is zero)")?;
+    for item in &relative {
+        println!("{:.6}", item.ratio);
+    }
     Ok(())
 }
 
