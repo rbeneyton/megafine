@@ -84,3 +84,69 @@ pub fn compute(results: &[BenchmarkResult], reference: usize) -> Option<Vec<Norm
 
     Some(relative)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    /// A `BenchmarkResult` with the given wall-clock samples (other fields unused
+    /// by `compute`).
+    fn result(label: &str, wall_clocks: &[f64]) -> BenchmarkResult {
+        BenchmarkResult {
+            label: label.to_string(),
+            measurements: wall_clocks
+                .iter()
+                .map(|&wall_clock| Execution {
+                    status: ExitStatus::from_raw(0),
+                    wall_clock,
+                    time_user: 0.0,
+                    time_system: 0.0,
+                    max_rss: 0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn ratios_against_first() {
+        let results = [result("a", &[0.1, 0.1]), result("b", &[0.2, 0.2])];
+        let rel = compute(&results, 0).unwrap();
+        assert!(rel[0].is_reference);
+        assert!(!rel[1].is_reference);
+        assert!((rel[0].ratio - 1.0).abs() < 1e-12);
+        assert!((rel[1].ratio - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn ratios_against_chosen_reference() {
+        let results = [result("a", &[0.1, 0.1]), result("b", &[0.2, 0.2])];
+        let rel = compute(&results, 1).unwrap();
+        assert!(!rel[0].is_reference);
+        assert!(rel[1].is_reference);
+        assert!((rel[0].ratio - 0.5).abs() < 1e-12);
+        assert!((rel[1].ratio - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn reference_out_of_range_is_none() {
+        let results = [result("a", &[0.1]), result("b", &[0.2])];
+        assert!(compute(&results, 2).is_none());
+    }
+
+    #[test]
+    fn zero_reference_mean_is_none() {
+        let results = [result("a", &[0.0, 0.0]), result("b", &[0.2, 0.2])];
+        assert!(compute(&results, 0).is_none());
+    }
+
+    #[test]
+    fn single_command_has_unit_ratio_and_no_stddev() {
+        let results = [result("a", &[0.1])];
+        let rel = compute(&results, 0).unwrap();
+        assert_eq!(rel.len(), 1);
+        assert!(rel[0].is_reference);
+        assert!((rel[0].ratio - 1.0).abs() < 1e-12);
+        assert!(rel[0].stddev.is_none());
+    }
+}

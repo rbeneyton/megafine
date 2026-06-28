@@ -116,3 +116,69 @@ impl Options {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// Parse args (clap) then build `Options`; binary name is implicit.
+    fn opts(args: &[&str]) -> Result<Options> {
+        let argv = std::iter::once("megafine").chain(args.iter().copied());
+        let cli = Cli::try_parse_from(argv).expect("args should parse at the clap level");
+        Options::from_cli(&cli)
+    }
+
+    #[test]
+    fn defaults() {
+        let o = opts(&["echo hi"]).unwrap();
+        assert_eq!(o.jobs, all_cores());
+        assert_eq!(o.reference, 0);
+        assert!(o.pin);
+        assert!(!o.raw);
+    }
+
+    #[test]
+    fn explicit_jobs() {
+        assert_eq!(opts(&["-j", "3", "a"]).unwrap().jobs, 3);
+    }
+
+    #[test]
+    fn default_jobs_minus_reserved() {
+        // Only meaningful when more than one CPU is available.
+        if all_cores() > 1 {
+            let o = opts(&["--pin-reserved", "1", "a"]).unwrap();
+            assert_eq!(o.jobs, all_cores() - 1);
+        }
+    }
+
+    #[test]
+    fn runs_zero_rejected() {
+        assert!(opts(&["-r", "0", "a"]).is_err());
+    }
+
+    #[test]
+    fn raw_needs_two_commands() {
+        assert!(opts(&["--raw", "a"]).is_err());
+        assert!(opts(&["--raw", "a", "b"]).is_ok());
+    }
+
+    #[test]
+    fn reference_validation() {
+        assert!(opts(&["--reference", "0", "a", "b"]).is_err());
+        assert!(opts(&["--reference", "99", "a", "b"]).is_err());
+        assert_eq!(opts(&["--reference", "2", "a", "b"]).unwrap().reference, 1);
+    }
+
+    #[test]
+    fn too_many_command_names() {
+        assert!(opts(&["a", "-n", "x", "y"]).is_err());
+    }
+
+    #[test]
+    fn no_pin_conflicts_with_pin_reserved() {
+        // Enforced by clap, so parsing itself fails.
+        let argv = ["megafine", "--no-pin", "--pin-reserved", "1", "a"];
+        assert!(Cli::try_parse_from(argv).is_err());
+    }
+}

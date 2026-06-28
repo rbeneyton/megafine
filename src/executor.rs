@@ -239,3 +239,44 @@ fn wait4(child: &Child) -> Result<Execution> {
         max_rss: (rusage.ru_maxrss.max(0) as u64) * 1024,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partition_even_split() {
+        let (reserved, groups) = partition(&[0, 1, 2, 3], 2, 0);
+        assert_eq!(reserved, vec![]);
+        assert_eq!(groups, vec![vec![0, 1], vec![2, 3]]);
+    }
+
+    #[test]
+    fn partition_natural_leftover() {
+        // 5 CPUs over 2 jobs: the low CPU is set aside.
+        let (reserved, groups) = partition(&[0, 1, 2, 3, 4], 2, 0);
+        assert_eq!(reserved, vec![0]);
+        assert_eq!(groups, vec![vec![1, 2], vec![3, 4]]);
+    }
+
+    #[test]
+    fn partition_with_reserve() {
+        let (reserved, groups) = partition(&[0, 1, 2, 3], 2, 2);
+        assert_eq!(reserved, vec![0, 1]);
+        assert_eq!(groups, vec![vec![2], vec![3]]);
+    }
+
+    #[test]
+    fn partition_reserve_plus_leftover() {
+        // 5 CPUs, reserve 1: 4 remain → 2 per worker, no extra leftover.
+        let (reserved, groups) = partition(&[0, 1, 2, 3, 4], 2, 1);
+        assert_eq!(reserved, vec![0]);
+        assert_eq!(groups, vec![vec![1, 2], vec![3, 4]]);
+    }
+
+    #[test]
+    fn partition_groups_are_equal_sized() {
+        let (_, groups) = partition(&[0, 1, 2, 3, 4, 5, 6], 3, 0);
+        assert!(groups.iter().all(|g| g.len() == groups[0].len()));
+    }
+}

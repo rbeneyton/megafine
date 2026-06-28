@@ -211,3 +211,62 @@ pub fn render_counters(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_time_unit() {
+        // TimeUnit has no Debug, so compare with `==` rather than assert_eq!.
+        assert!(TimeUnit::parse("us") == Some(TimeUnit::Microsecond));
+        assert!(TimeUnit::parse("µs") == Some(TimeUnit::Microsecond));
+        assert!(TimeUnit::parse("ms") == Some(TimeUnit::Millisecond));
+        assert!(TimeUnit::parse("second") == Some(TimeUnit::Second));
+        assert!(TimeUnit::parse("ns").is_none());
+    }
+
+    #[test]
+    fn auto_unit_boundaries() {
+        assert!(auto_unit(1e-4) == TimeUnit::Microsecond);
+        assert!(auto_unit(0.5) == TimeUnit::Millisecond);
+        assert!(auto_unit(5.0) == TimeUnit::Second);
+    }
+
+    #[test]
+    fn time_formatting() {
+        assert_eq!(format_time(0.0015, TimeUnit::Millisecond), "1.500 ms");
+        assert_eq!(format_time(2.0, TimeUnit::Second), "2.000 s");
+    }
+
+    #[test]
+    fn byte_formatting() {
+        assert_eq!(format_bytes(500), "500 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(5 << 20), "5.0 MB");
+    }
+
+    #[test]
+    fn truncate_short_unchanged() {
+        assert_eq!(truncate("abc", 5), "abc");
+        assert_eq!(truncate("abc", 3), "abc");
+    }
+
+    #[test]
+    fn truncate_keeps_front_and_back() {
+        // max 4 → budget 3: front = ceil(3/2)=2 ('ab'), '…', back = 1 ('f').
+        assert_eq!(truncate("abcdef", 4), "ab…f");
+    }
+
+    #[test]
+    fn truncate_multibyte() {
+        // Counts characters, not bytes; must not split a multibyte char.
+        assert_eq!(truncate("ééééé", 3), "é…é");
+    }
+
+    #[test]
+    fn truncate_tiny_budget() {
+        assert_eq!(truncate("abcdef", 1), "a");
+        assert_eq!(truncate("abcdef", 0), "");
+    }
+}

@@ -172,7 +172,6 @@ apply), or if `--no-calibrate` option is used.
 - [ ] add an estimated end time when -r is specified
 - [ ] allow to define a target stddev (ie. run until you've reached ±1%)
 - [ ] allow to force a pattern-defined scheduling (strict round robin per worker, …)
-- [ ] add tests, in case of many features 
 
 ## Changelog
 
@@ -188,6 +187,9 @@ apply), or if `--no-calibrate` option is used.
   scripts or AI skill usage
 - [x] `--reference IDX` to pick the relative-speed baseline (1-based command
   index; default: the first command)
+- [x] Test suite: in-module unit tests (stats, formatting, ratio/reference
+  computation, CPU partitioning, CLI validation) and end-to-end `tests/cli.rs`
+  driving the binary (runs, `-j`, `--raw`, `--reference`, region, stdin, errors)
 
 ### [0.1.0] 2026-06-05
 
