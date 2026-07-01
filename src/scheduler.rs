@@ -28,6 +28,9 @@ struct Task {
     warmup: bool,
     /// A `/bin/true` calibration probe rather than a real command run.
     calibration: bool,
+    /// Unique incrementing id, exposed as `MEGAFINE_RUN_ID` (unused when
+    /// `calibration`).
+    run_id: u64,
     spec: Arc<CmdSpec>,
 }
 
@@ -68,6 +71,7 @@ fn calibration_round(
             cmd_idx: 0,
             warmup: false,
             calibration: true,
+            run_id: 0,
             spec: spec.clone(),
         };
         if job_tx.send(Job::Run(task)).is_err() {
@@ -123,12 +127,13 @@ struct CmdState {
 /// Run a single task on a worker: optional (unmeasured) prepare, then the
 /// measured command. A non-zero exit from either surfaces as an `Err`.
 fn run_task(options: &Options, task: &Task) -> Result<Execution> {
+    let run_id = (!task.calibration).then_some(task.run_id);
     if let Some(prepare) = &task.spec.prepare {
         options
-            .execute(prepare, false)
+            .execute(prepare, false, run_id)
             .context("the prepare command failed")?;
     }
-    options.execute(&task.spec.command_line, options.region)
+    options.execute(&task.spec.command_line, options.region, run_id)
 }
 
 /// Pick the next command to schedule, round-robin from `rr`. Warmup runs of a
@@ -340,7 +345,7 @@ pub fn run_benchmarks(
             if let Some(setup) = &options.setup {
                 for _ in states.iter() {
                     // no '?' operator here for unicity
-                    if let Err(e) = options.execute(setup, false) {
+                    if let Err(e) = options.execute(setup, false, None) {
                         aborted = true;
                         abort_error = Some(e.context("the setup command failed"));
                         break;
@@ -352,6 +357,7 @@ pub fn run_benchmarks(
             let fill = |states: &mut [CmdState],
                         rr: &mut usize,
                         in_flight_total: &mut usize,
+                        next_run_id: &mut u64,
                         stop: bool|
              -> bool {
                 if stop {
@@ -367,8 +373,10 @@ pub fn run_benchmarks(
                         cmd_idx: i,
                         warmup,
                         calibration: false,
+                        run_id: *next_run_id,
                         spec: s.spec.clone(),
                     };
+                    *next_run_id += 1;
                     if warmup {
                         s.warmup_remaining -= 1;
                         s.warmup_in_flight += 1;
@@ -387,11 +395,13 @@ pub fn run_benchmarks(
             // {{{ boostrap+loop
             let mut in_flight_total = 0usize;
             let mut rr = 0usize;
+            let mut next_run_id = 0u64;
 
             fill(
                 &mut states,
                 &mut rr,
                 &mut in_flight_total,
+                &mut next_run_id,
                 aborted || interrupted.load(Ordering::Relaxed),
             );
 
@@ -465,14 +475,20 @@ pub fn run_benchmarks(
                     states[i].completed = true;
                     publish_counters(&states, options, &display_tx);
                     if let Some(cleanup) = &options.cleanup
-                        && let Err(e) = options.execute(cleanup, false)
+                        && let Err(e) = options.execute(cleanup, false, None)
                     {
                         aborted = true;
                         abort_error = Some(e.context("the cleanup command failed"));
                     }
                 }
 
-                if !fill(&mut states, &mut rr, &mut in_flight_total, aborted || intr) {
+                if !fill(
+                    &mut states,
+                    &mut rr,
+                    &mut in_flight_total,
+                    &mut next_run_id,
+                    aborted || intr,
+                ) {
                     break;
                 }
             }

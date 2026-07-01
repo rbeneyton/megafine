@@ -71,6 +71,21 @@ Exactly like hyperfine:
 - --prepare 'CMD' : will run this command before each command execution;
 - --cleanup 'CMD' : will run this command after each command execution;
 
+### Run id
+
+Every run is given a unique id, incrementing from 0 (warmup runs included),
+exposed to the benchmarked command as the `MEGAFINE_RUN_ID` environment
+variable. The `--prepare` command of a run sees the same value as the run
+itself. Since megafine executes runs concurrently, use it to keep generated
+files apart and avoid any contention:
+
+```sh
+megafine -S -j 4 -r 10 -p 'generate > in.$MEGAFINE_RUN_ID' 'process in.$MEGAFINE_RUN_ID'
+```
+
+Note that `$MEGAFINE_RUN_ID` expansion needs a shell (`-S`, or wrap the
+command in `sh -c '…'`); direct execution does not expand variables.
+
 ### Region timing
 
 The goal here is to avoid measurements to be polluted by initial data loading,
@@ -190,6 +205,8 @@ apply), or if `--no-calibrate` option is used.
 - [x] Test suite: in-module unit tests (stats, formatting, ratio/reference
   computation, CPU partitioning, CLI validation) and end-to-end `tests/cli.rs`
   driving the binary (runs, `-j`, `--raw`, `--reference`, region, stdin, errors)
+- [x] `MEGAFINE_RUN_ID` env var: unique incrementing run id (shared with the
+  run's `--prepare`), to keep concurrently generated files apart
 
 ### [0.1.0] 2026-06-05
 

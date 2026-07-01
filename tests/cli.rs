@@ -132,6 +132,58 @@ fn region_mode_reports_a_benchmark() {
     assert!(stdout(&out).contains("Benchmark 1"), "stdout: {}", stdout(&out));
 }
 
+/// Temp file collecting one line per run, removed on drop.
+struct RunLog(std::path::PathBuf);
+
+impl RunLog {
+    fn new(tag: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("megafine-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        RunLog(path)
+    }
+
+    fn lines(&self) -> Vec<String> {
+        std::fs::read_to_string(&self.0)
+            .expect("run log should exist")
+            .lines()
+            .map(String::from)
+            .collect()
+    }
+}
+
+impl Drop for RunLog {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[test]
+fn run_id_is_unique_and_incrementing() {
+    let log = RunLog::new("run-id");
+    let cmd = format!("sh -c 'echo $MEGAFINE_RUN_ID >> {}'", log.0.display());
+    let out = run(&[
+        "-j", "2", "-w", "2", "-r", "4", "--no-calibrate", "--no-pin", &cmd,
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let mut ids: Vec<u64> = log.lines().iter().map(|l| l.parse().unwrap()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, (0..6).collect::<Vec<u64>>()); // 2 warmups + 4 runs
+}
+
+#[test]
+fn prepare_shares_run_id_with_its_run() {
+    let log = RunLog::new("prepare-id");
+    let prepare = format!("sh -c 'echo p$MEGAFINE_RUN_ID >> {}'", log.0.display());
+    let cmd = format!("sh -c 'echo c$MEGAFINE_RUN_ID >> {}'", log.0.display());
+    let out = run(&[
+        "-p", &prepare, "-r", "3", "--no-calibrate", "--no-pin", &cmd,
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let mut lines = log.lines();
+    lines.sort_unstable();
+    assert_eq!(lines, vec!["c0", "c1", "c2", "p0", "p1", "p2"]);
+}
+
 #[test]
 fn raw_with_one_command_errors() {
     let out = run(&["--raw", "-r", "2", "--no-calibrate", "sleep 0.02"]);

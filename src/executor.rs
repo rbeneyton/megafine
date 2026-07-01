@@ -42,12 +42,22 @@ impl Options {
     /// With `region`, hand the child a pipe via `MEGAFINE_FD` and report the
     /// wall-clock summed across its `megafine_start()`/`megafine_stop()` calls
     /// instead of the whole-process elapsed time.
-    pub fn execute(&self, command_line: &str, region: bool) -> Result<Execution> {
+    ///
+    /// `run_id`, when set, is exposed to the child as `MEGAFINE_RUN_ID`.
+    pub fn execute(
+        &self,
+        command_line: &str,
+        region: bool,
+        run_id: Option<u64>,
+    ) -> Result<Execution> {
         let mut command = self.build(command_line)?;
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
+        if let Some(id) = run_id {
+            command.env("MEGAFINE_RUN_ID", id.to_string());
+        }
 
         // Both ends close-on-exec; we re-open the write end in the child below.
         let region_pipe = region
