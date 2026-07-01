@@ -21,6 +21,7 @@ struct CmdSpec {
     label: Box<str>,
     command_line: Box<str>,
     prepare: Option<Box<str>>,
+    conclude: Option<Box<str>>,
 }
 
 struct Task {
@@ -65,6 +66,7 @@ fn calibration_round(
         label: Box::from("/bin/true"),
         command_line: Box::from("/bin/true"),
         prepare: None,
+        conclude: None,
     });
     for _ in 0..n {
         let task = Task {
@@ -125,7 +127,8 @@ struct CmdState {
 }
 
 /// Run a single task on a worker: optional (unmeasured) prepare, then the
-/// measured command. A non-zero exit from either surfaces as an `Err`.
+/// measured command, then optional (unmeasured) conclude. A non-zero exit
+/// from any of them surfaces as an `Err`.
 fn run_task(options: &Options, task: &Task) -> Result<Execution> {
     let run_id = (!task.calibration).then_some(task.run_id);
     if let Some(prepare) = &task.spec.prepare {
@@ -133,7 +136,13 @@ fn run_task(options: &Options, task: &Task) -> Result<Execution> {
             .execute(prepare, false, run_id)
             .context("the prepare command failed")?;
     }
-    options.execute(&task.spec.command_line, options.region, run_id)
+    let execution = options.execute(&task.spec.command_line, options.region, run_id)?;
+    if let Some(conclude) = &task.spec.conclude {
+        options
+            .execute(conclude, false, run_id)
+            .context("the conclude command failed")?;
+    }
+    Ok(execution)
 }
 
 /// Pick the next command to schedule, round-robin from `rr`. Warmup runs of a
@@ -320,6 +329,7 @@ pub fn run_benchmarks(
                         label: Box::from(command.label()),
                         command_line: Box::from(command.line),
                         prepare: options.prepare.as_deref().map(Box::from),
+                        conclude: options.conclude.as_deref().map(Box::from),
                     });
                     CmdState {
                         spec,

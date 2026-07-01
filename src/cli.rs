@@ -43,6 +43,10 @@ pub struct Cli {
     #[arg(short = 'p', long, value_name = "CMD")]
     pub prepare: Option<String>,
 
+    /// Execute CMD after each timing run.
+    #[arg(long, value_name = "CMD")]
+    pub conclude: Option<String>,
+
     /// Execute CMD after all timing runs of each command.
     #[arg(short = 'c', long, value_name = "CMD")]
     pub cleanup: Option<String>,

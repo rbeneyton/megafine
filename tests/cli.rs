@@ -185,6 +185,20 @@ fn prepare_shares_run_id_with_its_run() {
 }
 
 #[test]
+fn conclude_runs_after_each_run_with_its_run_id() {
+    let log = RunLog::new("conclude-id");
+    let cmd = format!("sh -c 'echo c$MEGAFINE_RUN_ID >> {}'", log.0.display());
+    let conclude = format!("sh -c 'echo z$MEGAFINE_RUN_ID >> {}'", log.0.display());
+    let out = run(&[
+        "--conclude", &conclude, "-r", "3", "--no-calibrate", "--no-pin", &cmd,
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let mut lines = log.lines();
+    lines.sort_unstable();
+    assert_eq!(lines, vec!["c0", "c1", "c2", "z0", "z1", "z2"]);
+}
+
+#[test]
 fn raw_with_one_command_errors() {
     let out = run(&["--raw", "-r", "2", "--no-calibrate", "sleep 0.02"]);
     assert!(!out.status.success());

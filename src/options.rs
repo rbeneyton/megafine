@@ -14,6 +14,7 @@ pub struct Options {
     pub shell: Option<PathBuf>,
     pub setup: Option<String>,
     pub prepare: Option<String>,
+    pub conclude: Option<String>,
     pub cleanup: Option<String>,
     pub time_unit: Option<TimeUnit>,
     /// Time only the command's `megafine_start()`/`megafine_stop()` region.
@@ -105,6 +106,7 @@ impl Options {
             shell,
             setup: cli.setup.clone(),
             prepare: cli.prepare.clone(),
+            conclude: cli.conclude.clone(),
             cleanup: cli.cleanup.clone(),
             time_unit,
             region: cli.region,

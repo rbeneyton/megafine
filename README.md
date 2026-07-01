@@ -69,14 +69,16 @@ Exactly like hyperfine:
   potentially simultaneously) without measuring timings;
 - --setup 'CMD' : will run this command before, once per commands;
 - --prepare 'CMD' : will run this command before each command execution;
+- --conclude 'CMD' : will run this command after each timing run (symmetric
+  to --prepare);
 - --cleanup 'CMD' : will run this command after each command execution;
 
 ### Run id
 
 Every run is given a unique id, incrementing from 0 (warmup runs included),
 exposed to the benchmarked command as the `MEGAFINE_RUN_ID` environment
-variable. The `--prepare` command of a run sees the same value as the run
-itself. Since megafine executes runs concurrently, use it to keep generated
+variable. The `--prepare` and `--conclude` commands of a run see the same
+value as the run itself. Since megafine executes runs concurrently, use it to keep generated
 files apart and avoid any contention:
 
 ```sh
@@ -207,6 +209,8 @@ apply), or if `--no-calibrate` option is used.
   driving the binary (runs, `-j`, `--raw`, `--reference`, region, stdin, errors)
 - [x] `MEGAFINE_RUN_ID` env var: unique incrementing run id (shared with the
   run's `--prepare`), to keep concurrently generated files apart
+- [x] `--conclude CMD` hook (after each timing run, symmetric to `--prepare`,
+  sharing its run id)
 
 ### [0.1.0] 2026-06-05
 
