@@ -211,6 +211,7 @@ apply), or if `--no-calibrate` option is used.
   run's `--prepare`), to keep concurrently generated files apart
 - [x] `--conclude CMD` hook (after each timing run, symmetric to `--prepare`,
   sharing its run id)
+- [x] Add live ratio measurement
 
 ### [0.1.0] 2026-06-05
 
