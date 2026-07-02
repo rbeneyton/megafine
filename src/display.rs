@@ -26,16 +26,25 @@ enum WorkerState {
 const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏', ' '];
 const FRAME: Duration = Duration::from_millis(500);
 
-/// Query the terminal width via the controlling tty, defaulting to 80 columns.
-pub fn term_width() -> usize {
+/// Query the terminal size via the controlling tty as `(rows, cols)`,
+/// defaulting to 24x80.
+fn term_size() -> (usize, usize) {
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 {
-            ws.ws_col as usize
+        if libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) == 0
+            && ws.ws_col > 0
+            && ws.ws_row > 0
+        {
+            (ws.ws_row as usize, ws.ws_col as usize)
         } else {
-            80
+            (24, 80)
         }
     }
+}
+
+/// Query the terminal width via the controlling tty, defaulting to 80 columns.
+pub fn term_width() -> usize {
+    term_size().1
 }
 
 /// Truncate to at most `cols - 1` characters so a line never fills the terminal
@@ -71,38 +80,51 @@ pub fn spawn_display(
         let n_lines = worker_state.len() + counter_msgs.len();
 
         let mut frame = 0usize;
-        let mut first = true;
         let mut last_anim = Instant::now();
 
-        let draw =
-            |frame: usize, worker_state: &[WorkerState], counter_msgs: &[String], first: bool| {
-                let cols = term_width();
-                let glyph = SPINNER[frame % SPINNER.len()];
-                let mut out = stderr().lock();
-                if !first {
-                    let _ = write!(out, "\x1b[{n_lines}A");
-                }
-                for (w, state) in worker_state.iter().enumerate() {
-                    let prefix = format!(" {glyph} worker {w}: ");
-                    let line = match state {
-                        WorkerState::Running(idx) => {
-                            // Reserve the prefix and the column fit() trims.
-                            let budget = cols.saturating_sub(1 + prefix.chars().count());
-                            format!("{prefix}{}", truncate(&command_labels[*idx], budget))
-                        }
-                        WorkerState::Calibrating => format!("{prefix}<calibration>"),
-                        WorkerState::Idle => format!("{prefix}idle"),
-                    };
-                    let _ = write!(out, "\r\x1b[2K{}\n", fit(&line, cols));
-                }
-                for msg in counter_msgs {
-                    let _ = write!(out, "\r\x1b[2K{}\n", fit(&format!("   {msg}"), cols));
-                }
-                let _ = out.flush();
-            };
+        // Each frame is one write: erase from the block's top (where the
+        // previous frame parked the cursor) to the end of the screen, print
+        // every line, and park back at the top. Anchoring on the block's first
+        // character survives resizes: when the emulator rewraps the previous
+        // frame it moves the parked cursor with the text, whereas counting a
+        // fixed number of lines upward from below would land mid-block and
+        // leave stale rows behind.
+        let draw = |frame: usize, worker_state: &[WorkerState], counter_msgs: &[String]| {
+            let (rows, cols) = term_size();
+            let glyph = SPINNER[frame % SPINNER.len()];
+            let mut lines: Vec<String> = Vec::with_capacity(n_lines);
+            for (w, state) in worker_state.iter().enumerate() {
+                let prefix = format!(" {glyph} worker {w}: ");
+                let line = match state {
+                    WorkerState::Running(idx) => {
+                        // Reserve the prefix and the column fit() trims.
+                        let budget = cols.saturating_sub(1 + prefix.chars().count());
+                        format!("{prefix}{}", truncate(&command_labels[*idx], budget))
+                    }
+                    WorkerState::Calibrating => format!("{prefix}<calibration>"),
+                    WorkerState::Idle => format!("{prefix}idle"),
+                };
+                lines.push(fit(&line, cols));
+            }
+            for msg in counter_msgs {
+                lines.push(fit(&format!("   {msg}"), cols));
+            }
+            // A frame taller than the screen would scroll on every redraw,
+            // spraying stale copies into the scrollback; keep the tail (the
+            // counters) and drop worker lines that don't fit.
+            let visible = lines.len().min(rows.saturating_sub(1)).max(1);
+            let mut buf = String::from("\x1b[?25l\r\x1b[J");
+            for line in &lines[lines.len() - visible..] {
+                buf.push_str(line);
+                buf.push('\n');
+            }
+            buf.push_str(&format!("\x1b[{visible}A"));
+            let mut out = stderr().lock();
+            let _ = out.write_all(buf.as_bytes());
+            let _ = out.flush();
+        };
 
-        draw(frame, &worker_state, &counter_msgs, first);
-        first = false;
+        draw(frame, &worker_state, &counter_msgs);
 
         loop {
             match rx.recv_timeout(FRAME) {
@@ -111,9 +133,10 @@ pub fn spawn_display(
                 Ok(DisplayMessage::Idle(w)) => worker_state[w] = WorkerState::Idle,
                 Ok(DisplayMessage::Counters(lines)) => counter_msgs = lines,
                 Ok(DisplayMessage::Done) | Err(RecvTimeoutError::Disconnected) => {
-                    // Move to the top of our block and erase everything below it.
+                    // The cursor is parked at the block's top: erase the block
+                    // and restore the cursor.
                     let mut out = stderr().lock();
-                    let _ = write!(out, "\x1b[{n_lines}A\x1b[J");
+                    let _ = out.write_all(b"\r\x1b[J\x1b[?25h");
                     let _ = out.flush();
                     break;
                 }
@@ -124,7 +147,7 @@ pub fn spawn_display(
                 frame = frame.wrapping_add(1);
                 last_anim = Instant::now();
             }
-            draw(frame, &worker_state, &counter_msgs, first);
+            draw(frame, &worker_state, &counter_msgs);
         }
     })
 }

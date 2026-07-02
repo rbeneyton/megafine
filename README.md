@@ -212,6 +212,7 @@ apply), or if `--no-calibrate` option is used.
 - [x] `--conclude CMD` hook (after each timing run, symmetric to `--prepare`,
   sharing its run id)
 - [x] Add live ratio measurement
+- [x] Fix resize issue
 
 ### [0.1.0] 2026-06-05
 
