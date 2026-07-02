@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 use crate::command::Command;
 use crate::display::{DisplayMessage, spawn_display, term_width};
 use crate::executor::{allowed_cpus, partition, pin_thread};
-use crate::format::{CounterRow, auto_unit, format_bytes, format_time, render_counters};
+use crate::format::{CounterRow, Relative, auto_unit, format_bytes, format_time, render_counters};
 use crate::measurement::{BenchmarkResult, Execution};
 use crate::options::Options;
 
@@ -177,7 +177,8 @@ fn done_dispatching(s: &CmdState, interrupted: bool) -> bool {
 /// Render every command's live counter as one aligned block and send it to the
 /// display, so all rows share a unit and line up (see `render_counters`).
 fn publish_counters(states: &[CmdState], options: &Options, display_tx: &Sender<DisplayMessage>) {
-    let rows: Vec<CounterRow> = states
+    // (count, mean, std) of every command's timed runs so far.
+    let summaries: Vec<(u64, f64, Option<f64>)> = states
         .iter()
         .map(|s| {
             let count = s.measurements.len() as u64;
@@ -188,12 +189,43 @@ fn publish_counters(states: &[CmdState], options: &Options, display_tx: &Sender<
             } else {
                 None
             };
+            (count, mean, std)
+        })
+        .collect();
+    let (_, ref_mean, ref_std) = summaries[options.reference];
+
+    let rows: Vec<CounterRow> = states
+        .iter()
+        .zip(&summaries)
+        .enumerate()
+        .map(|(i, (s, &(count, mean, std)))| {
+            // Live counterpart of the final ranking, against the reference's
+            // current mean; absent until both sides have a measurement.
+            let relative = if states.len() < 2 {
+                None
+            } else if i == options.reference {
+                Some(Relative::Reference)
+            } else if count > 0 && ref_mean > 0.0 {
+                let stddev = match (std, ref_std) {
+                    (Some(std), Some(ref_std)) => {
+                        Some(crate::stats::ratio_stddev(mean, std, ref_mean, ref_std))
+                    }
+                    _ => None,
+                };
+                Some(Relative::Ratio {
+                    ratio: mean / ref_mean,
+                    stddev,
+                })
+            } else {
+                None
+            };
             CounterRow {
                 label: &s.spec.label,
                 count,
                 mean,
                 std,
                 peak_rss: s.max_rss,
+                relative,
             }
         })
         .collect();

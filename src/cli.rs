@@ -25,7 +25,13 @@ pub struct Cli {
     pub jobs: Option<usize>,
 
     /// Perform NUM warmup runs before the actual benchmark.
-    #[arg(short, long, value_name = "NUM", default_value_t = 0, help_heading = "Execution")]
+    #[arg(
+        short,
+        long,
+        value_name = "NUM",
+        default_value_t = 0,
+        help_heading = "Execution"
+    )]
     pub warmup: u64,
 
     /// Perform exactly NUM runs. If omitted, run until interrupted with Ctrl-C.

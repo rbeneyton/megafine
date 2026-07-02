@@ -63,12 +63,7 @@ pub fn compute(results: &[BenchmarkResult], reference: usize) -> Option<Vec<Norm
             let ratio = mean / ref_mean;
             let stddev = match (stddev, ref_stddev) {
                 (Some(stddev), Some(ref_stddev)) => {
-                    // same formula than hyperfine:
-                    // https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Example_formulae
-                    // for f=A/B
-                    // with σ_{AB} assumed to be = 0
-
-                    Some(ratio * ((stddev / mean).powi(2) + (ref_stddev / ref_mean).powi(2)).sqrt())
+                    Some(stats::ratio_stddev(mean, stddev, ref_mean, ref_stddev))
                 }
                 _ => None,
             };

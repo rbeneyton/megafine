@@ -25,6 +25,13 @@ pub fn mean_stddev(values: &[f64]) -> (f64, Option<f64>) {
     (m, Some(variance.sqrt()))
 }
 
+/// Propagated uncertainty on the ratio `mean / ref_mean` of two measured means,
+/// assuming zero covariance (same formula as hyperfine, for f = A/B):
+/// https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Example_formulae
+pub fn ratio_stddev(mean: f64, stddev: f64, ref_mean: f64, ref_stddev: f64) -> f64 {
+    (mean / ref_mean) * ((stddev / mean).powi(2) + (ref_stddev / ref_mean).powi(2)).sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,6 +53,12 @@ mod tests {
     fn stddev_needs_two_values() {
         assert_eq!(mean_stddev(&[]), (0.0, None));
         assert_eq!(mean_stddev(&[5.0]), (5.0, None));
+    }
+
+    #[test]
+    fn ratio_stddev_propagation() {
+        // f = A/B with A = 2 ± 0.2, B = 1 ± 0.1: σ_f = 2·√(0.01 + 0.01).
+        assert!((ratio_stddev(2.0, 0.2, 1.0, 0.1) - 0.282_842_712).abs() < 1e-6);
     }
 
     #[test]

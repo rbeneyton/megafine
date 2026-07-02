@@ -35,7 +35,12 @@ fn basic_run() {
 #[test]
 fn two_commands_show_ranking() {
     let out = run(&[
-        "-r", "2", "--no-calibrate", "--no-pin", "sleep 0.02", "sleep 0.05",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+        "sleep 0.05",
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let s = stdout(&out);
@@ -47,7 +52,13 @@ fn two_commands_show_ranking() {
 #[test]
 fn raw_outputs_only_ratios() {
     let out = run(&[
-        "--raw", "-r", "2", "--no-calibrate", "--no-pin", "sleep 0.02", "sleep 0.05",
+        "--raw",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+        "sleep 0.05",
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let s = stdout(&out);
@@ -59,7 +70,14 @@ fn raw_outputs_only_ratios() {
 #[test]
 fn raw_reference_picks_baseline() {
     let out = run(&[
-        "--raw", "--reference", "2", "-r", "2", "--no-calibrate", "--no-pin", "sleep 0.02",
+        "--raw",
+        "--reference",
+        "2",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
         "sleep 0.05",
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
@@ -71,7 +89,14 @@ fn raw_reference_picks_baseline() {
 #[test]
 fn reference_marks_chosen_command() {
     let out = run(&[
-        "--reference", "2", "-r", "2", "--no-calibrate", "--no-pin", "sleep 0.02", "sleep 0.05",
+        "--reference",
+        "2",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+        "sleep 0.05",
         "sleep 0.08",
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
@@ -87,7 +112,13 @@ fn reference_marks_chosen_command() {
 fn command_name_is_shown() {
     // Commands before -n, since -n greedily consumes the rest.
     let out = run(&[
-        "-r", "2", "--no-calibrate", "--no-pin", "sleep 0.02", "-n", "MYNAME",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+        "-n",
+        "MYNAME",
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert!(stdout(&out).contains("MYNAME"), "stdout: {}", stdout(&out));
@@ -111,13 +142,25 @@ fn reads_commands_from_stdin() {
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let s = stdout(&out);
-    assert!(s.contains("Benchmark 1") && s.contains("Benchmark 2"), "stdout: {s}");
+    assert!(
+        s.contains("Benchmark 1") && s.contains("Benchmark 2"),
+        "stdout: {s}"
+    );
 }
 
 #[test]
 fn jobs_and_warmup_smoke() {
     let out = run(&[
-        "-j", "2", "-w", "1", "-r", "2", "--no-calibrate", "--no-pin", "sleep 0.02", "sleep 0.02",
+        "-j",
+        "2",
+        "-w",
+        "1",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+        "sleep 0.02",
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
 }
@@ -129,7 +172,11 @@ fn region_mode_reports_a_benchmark() {
     let cmd = format!("{region_bin} 0.02 0.05 0.02");
     let out = run(&["--region", "-r", "2", "--no-pin", &cmd]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
-    assert!(stdout(&out).contains("Benchmark 1"), "stdout: {}", stdout(&out));
+    assert!(
+        stdout(&out).contains("Benchmark 1"),
+        "stdout: {}",
+        stdout(&out)
+    );
 }
 
 /// Temp file collecting one line per run, removed on drop.
@@ -162,7 +209,15 @@ fn run_id_is_unique_and_incrementing() {
     let log = RunLog::new("run-id");
     let cmd = format!("sh -c 'echo $MEGAFINE_RUN_ID >> {}'", log.0.display());
     let out = run(&[
-        "-j", "2", "-w", "2", "-r", "4", "--no-calibrate", "--no-pin", &cmd,
+        "-j",
+        "2",
+        "-w",
+        "2",
+        "-r",
+        "4",
+        "--no-calibrate",
+        "--no-pin",
+        &cmd,
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let mut ids: Vec<u64> = log.lines().iter().map(|l| l.parse().unwrap()).collect();
@@ -176,7 +231,13 @@ fn prepare_shares_run_id_with_its_run() {
     let prepare = format!("sh -c 'echo p$MEGAFINE_RUN_ID >> {}'", log.0.display());
     let cmd = format!("sh -c 'echo c$MEGAFINE_RUN_ID >> {}'", log.0.display());
     let out = run(&[
-        "-p", &prepare, "-r", "3", "--no-calibrate", "--no-pin", &cmd,
+        "-p",
+        &prepare,
+        "-r",
+        "3",
+        "--no-calibrate",
+        "--no-pin",
+        &cmd,
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let mut lines = log.lines();
@@ -190,7 +251,13 @@ fn conclude_runs_after_each_run_with_its_run_id() {
     let cmd = format!("sh -c 'echo c$MEGAFINE_RUN_ID >> {}'", log.0.display());
     let conclude = format!("sh -c 'echo z$MEGAFINE_RUN_ID >> {}'", log.0.display());
     let out = run(&[
-        "--conclude", &conclude, "-r", "3", "--no-calibrate", "--no-pin", &cmd,
+        "--conclude",
+        &conclude,
+        "-r",
+        "3",
+        "--no-calibrate",
+        "--no-pin",
+        &cmd,
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let mut lines = log.lines();
@@ -202,14 +269,22 @@ fn conclude_runs_after_each_run_with_its_run_id() {
 fn raw_with_one_command_errors() {
     let out = run(&["--raw", "-r", "2", "--no-calibrate", "sleep 0.02"]);
     assert!(!out.status.success());
-    assert!(stderr(&out).contains("2 commands"), "stderr: {}", stderr(&out));
+    assert!(
+        stderr(&out).contains("2 commands"),
+        "stderr: {}",
+        stderr(&out)
+    );
 }
 
 #[test]
 fn reference_out_of_range_errors() {
     let out = run(&["--reference", "5", "-r", "2", "--no-calibrate", "a", "b"]);
     assert!(!out.status.success());
-    assert!(stderr(&out).contains("out of range"), "stderr: {}", stderr(&out));
+    assert!(
+        stderr(&out).contains("out of range"),
+        "stderr: {}",
+        stderr(&out)
+    );
 }
 
 #[test]
@@ -222,5 +297,9 @@ fn runs_zero_errors() {
 fn failing_command_errors() {
     let out = run(&["-r", "1", "--no-calibrate", "--no-pin", "false"]);
     assert!(!out.status.success());
-    assert!(stderr(&out).contains("non-zero"), "stderr: {}", stderr(&out));
+    assert!(
+        stderr(&out).contains("non-zero"),
+        "stderr: {}",
+        stderr(&out)
+    );
 }

@@ -100,6 +100,16 @@ pub fn truncate(s: &str, max: usize) -> String {
     out
 }
 
+/// A row's live relation to the reference command, mirroring the final ranking.
+#[derive(Clone, Copy)]
+pub enum Relative {
+    /// This row is the reference command itself.
+    Reference,
+    /// `mean / reference_mean`, with the propagated uncertainty on it when
+    /// both stddevs are known.
+    Ratio { ratio: f64, stddev: Option<f64> },
+}
+
 /// One command's live progress, in raw values; rendered together with its peers.
 pub struct CounterRow<'a> {
     pub label: &'a str,
@@ -107,6 +117,8 @@ pub struct CounterRow<'a> {
     pub mean: f64,
     pub std: Option<f64>,
     pub peak_rss: u64,
+    /// Standing against the reference command, when it can already be shown.
+    pub relative: Option<Relative>,
 }
 
 /// Render all live counter lines as a column-aligned block. Every column shares
@@ -165,6 +177,44 @@ pub fn render_counters(
             .unwrap()
     });
 
+    // The relative column mirrors the final ranking's tail: `reference` on the
+    // reference row, `+x.xx% (± u.uu)` on the others, decimal-aligned.
+    let pct_w = present
+        .iter()
+        .filter_map(|r| match r.relative {
+            Some(Relative::Ratio { ratio, .. }) => {
+                Some(format!("{:+.2}", (ratio - 1.0) * 100.0).len())
+            }
+            _ => None,
+        })
+        .max();
+    let unc_w = present
+        .iter()
+        .filter_map(|r| match r.relative {
+            Some(Relative::Ratio {
+                stddev: Some(stddev),
+                ..
+            }) => Some(format!("{:.2}", stddev * 100.0).len()),
+            _ => None,
+        })
+        .max();
+    let rel_cells: Vec<String> = rows
+        .iter()
+        .map(|r| match (r.relative, pct_w) {
+            _ if r.count == 0 => String::new(),
+            (Some(Relative::Reference), _) => "reference".to_string(),
+            (Some(Relative::Ratio { ratio, stddev }), Some(pw)) => {
+                let pct = format!("{:+.2}", (ratio - 1.0) * 100.0);
+                let mut cell = format!("{pct:>pw$}%");
+                if let (Some(stddev), Some(uw)) = (stddev, unc_w) {
+                    cell.push_str(&format!(" (± {:>uw$})", format!("{:.2}", stddev * 100.0)));
+                }
+                cell
+            }
+            _ => String::new(),
+        })
+        .collect();
+
     // Cap the label column so the duration columns that follow it stay visible
     // within `budget`. The tail width is fixed once the columns above are known.
     let suffix_w = suffix.chars().count();
@@ -174,10 +224,17 @@ pub fn render_counters(
         (Some(u), Some(rw)) => 7 + rw + 1 + BYTE_UNITS[u].chars().count(),
         _ => 0,
     };
-    let label_w = label_w.min(budget.saturating_sub(fixed_tail + std_tail + peak_tail));
+    let rel_w = rel_cells
+        .iter()
+        .map(|c| c.chars().count())
+        .max()
+        .unwrap_or(0);
+    let rel_tail = if rel_w > 0 { 2 + rel_w } else { 0 };
+    let label_w = label_w.min(budget.saturating_sub(fixed_tail + std_tail + peak_tail + rel_tail));
 
     rows.iter()
-        .map(|x| {
+        .zip(&rel_cells)
+        .map(|(x, rel)| {
             let label = truncate(x.label, label_w);
             if x.count == 0 {
                 return format!("{label:<label_w$}  pending");
@@ -206,6 +263,9 @@ pub fn render_counters(
                     format_byte_value(x.peak_rss, u),
                     BYTE_UNITS[u],
                 ));
+            }
+            if !rel.is_empty() {
+                line.push_str(&format!("  {rel}"));
             }
             line
         })
@@ -268,5 +328,78 @@ mod tests {
     fn truncate_tiny_budget() {
         assert_eq!(truncate("abcdef", 1), "a");
         assert_eq!(truncate("abcdef", 0), "");
+    }
+
+    /// A `CounterRow` without peak RSS, so the relative column follows the times.
+    fn counter_row(
+        count: u64,
+        mean: f64,
+        std: Option<f64>,
+        relative: Option<Relative>,
+    ) -> CounterRow<'static> {
+        CounterRow {
+            label: "x",
+            count,
+            mean,
+            std,
+            peak_rss: 0,
+            relative,
+        }
+    }
+
+    #[test]
+    fn counters_relative_column() {
+        let rows = [
+            counter_row(3, 1.0, Some(0.1), Some(Relative::Reference)),
+            counter_row(
+                3,
+                1.1,
+                Some(0.1),
+                Some(Relative::Ratio {
+                    ratio: 1.1044,
+                    stddev: Some(0.0587),
+                }),
+            ),
+        ];
+        let lines = render_counters(&rows, None, 200);
+        assert!(lines[0].ends_with("  reference"), "{}", lines[0]);
+        assert!(lines[1].ends_with("  +10.44% (± 5.87)"), "{}", lines[1]);
+    }
+
+    #[test]
+    fn counters_relative_alignment() {
+        // Percentages of different widths right-align; a row without an
+        // uncertainty (single run on either side) just ends at the '%'.
+        let rows = [
+            counter_row(3, 1.0, Some(0.1), Some(Relative::Reference)),
+            counter_row(
+                1,
+                1.095,
+                None,
+                Some(Relative::Ratio {
+                    ratio: 1.095,
+                    stddev: None,
+                }),
+            ),
+            counter_row(
+                3,
+                2.234,
+                Some(0.1),
+                Some(Relative::Ratio {
+                    ratio: 2.234,
+                    stddev: Some(0.123),
+                }),
+            ),
+        ];
+        let lines = render_counters(&rows, None, 200);
+        assert!(lines[1].ends_with("    +9.50%"), "{}", lines[1]);
+        assert!(lines[2].ends_with("  +123.40% (± 12.30)"), "{}", lines[2]);
+    }
+
+    #[test]
+    fn counters_without_relative_have_no_column() {
+        let rows = [counter_row(2, 0.5, Some(0.1), None)];
+        let lines = render_counters(&rows, None, 200);
+        assert!(lines[0].ends_with("ms"), "{}", lines[0]);
     }
 }
