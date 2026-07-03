@@ -38,10 +38,12 @@ fn main() -> Result<()> {
     let interrupted = Arc::new(AtomicBool::new(false));
 
     let commands = command::from_cli(&cli);
-    let results = scheduler::run_benchmarks(commands, &options, interrupted)?;
-    // The reference command may have produced no measurements (e.g. Ctrl-C left
-    // fewer results than commands); bail before compute() indexes out of range.
-    if !results.is_empty() && options.reference >= results.len() {
+    let (results, error) = scheduler::run_benchmarks(commands, &options, interrupted)?;
+    // The reference command may have produced no measurements (e.g. Ctrl-C or an
+    // abort left fewer results than commands); keep compute() from indexing out
+    // of range, without masking a pending run error with that diagnostic.
+    let reference_missing = !results.is_empty() && options.reference >= results.len();
+    if reference_missing && error.is_none() {
         bail!(
             "--reference {} has no measurements (only {} command(s) produced results)",
             options.reference + 1,
@@ -49,13 +51,22 @@ fn main() -> Result<()> {
         );
     }
     if options.raw {
-        print_raw(&results, options.reference)?;
+        // On a failed run, keep stdout empty: partial ratios could be mistaken
+        // for complete results by the scripts consuming them.
+        if error.is_none() {
+            print_raw(&results, options.reference)?;
+        }
     } else {
         print_results(&results, &options);
-        print_ranks(&results, options.reference);
+        if !reference_missing {
+            print_ranks(&results, options.reference);
+        }
     }
 
-    Ok(())
+    match error {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 /// Print one ratio per line (command order, relative to the `reference`-th

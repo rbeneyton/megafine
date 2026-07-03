@@ -303,3 +303,44 @@ fn failing_command_errors() {
         stderr(&out)
     );
 }
+
+#[test]
+fn failing_run_dumps_partial_results() {
+    // Succeeds for run ids 0 and 1, fails on 2; -j 1 makes the abort point
+    // deterministic, so exactly 2 measurements are collected before the error.
+    let out = run(&[
+        "-j",
+        "1",
+        "-r",
+        "5",
+        "--no-calibrate",
+        "--no-pin",
+        "sh -c 'test $MEGAFINE_RUN_ID -lt 2'",
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("non-zero"),
+        "stderr: {}",
+        stderr(&out)
+    );
+    let s = stdout(&out);
+    assert!(s.contains("Benchmark 1"), "stdout: {s}");
+    assert!(s.contains("2 runs"), "stdout: {s}");
+}
+
+#[test]
+fn failing_run_keeps_raw_stdout_empty() {
+    let out = run(&[
+        "--raw",
+        "-j",
+        "1",
+        "-r",
+        "3",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.01",
+        "false",
+    ]);
+    assert!(!out.status.success());
+    assert!(stdout(&out).is_empty(), "stdout: {}", stdout(&out));
+}

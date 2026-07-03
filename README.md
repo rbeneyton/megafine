@@ -174,7 +174,8 @@ To keep results honest, at startup megafine runs `/bin/true` twice per worker
 (a warmup and a measurements pass), and takes the mean wall-clock and peak RSS
 of the measured round as a noise floor. If a benchmarked command is below
 those values (mean time or peak RSS), the run is aborted with a message and a
-non-zero exit. Calibration and this check are skipped in `--region` mode (it
+non-zero exit, after printing the statistics collected so far (as for any
+failed run). Calibration and this check are skipped in `--region` mode (it
 times a sub-window and forks for its pipe, so the whole-process floor doesn't
 apply), or if `--no-calibrate` option is used.
 
@@ -213,6 +214,9 @@ apply), or if `--no-calibrate` option is used.
   sharing its run id)
 - [x] Add live ratio measurement
 - [x] Fix resize issue
+- [x] Dump the statistics collected so far when a run fails (non-zero return
+  code), before reporting the error (in `--raw` mode stdout stays empty, so
+  scripts cannot mistake partial ratios for complete results)
 
 ### [0.1.0] 2026-06-05
 

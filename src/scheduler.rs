@@ -238,12 +238,14 @@ fn publish_counters(states: &[CmdState], options: &Options, display_tx: &Sender<
 
 /// Run all benchmarks concurrently, keeping every worker busy by dispatching
 /// runs across commands (and multiple concurrent runs of the same command).
-/// Returns the collected results (command order), or `Err` if a benchmark failed.
+/// Returns the collected results (command order) plus the error that aborted
+/// the run, if any, so the measurements gathered before a failure can still be
+/// reported. `Err` is reserved for failures before any run starts.
 pub fn run_benchmarks(
     commands: Vec<Command>,
     options: &Options,
     interrupted: Arc<AtomicBool>,
-) -> Result<Vec<BenchmarkResult>, anyhow::Error> {
+) -> Result<(Vec<BenchmarkResult>, Option<anyhow::Error>), anyhow::Error> {
     let jobs = options.jobs;
     debug!(jobs, commands = commands.len(), "starting scheduler");
 
@@ -290,7 +292,7 @@ pub fn run_benchmarks(
     let display_canary = &AtomicUsize::new(jobs);
 
     let outcome = std::thread::scope(
-        move |scope| -> Result<Vec<BenchmarkResult>, anyhow::Error> {
+        move |scope| -> Result<(Vec<BenchmarkResult>, Option<anyhow::Error>), anyhow::Error> {
             // {{{ Create workers
             for w in 0..jobs {
                 let job_rx = job_rx.clone();
@@ -551,10 +553,11 @@ pub fn run_benchmarks(
                 }
             }
 
-            match abort_error {
-                Some(e) if !interrupted.load(Ordering::SeqCst) => Err(e),
-                _ => Ok(results),
-            }
+            let error = match abort_error {
+                Some(e) if !interrupted.load(Ordering::SeqCst) => Some(e),
+                _ => None,
+            };
+            Ok((results, error))
         },
     );
 
