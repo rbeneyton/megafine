@@ -80,6 +80,17 @@ pub fn format_bytes(bytes: u64) -> String {
     format!("{} {}", format_byte_value(bytes, unit), BYTE_UNITS[unit])
 }
 
+/// Human-friendly duration for the live ETA: coarse, integer fields.
+pub fn format_duration(seconds: f64) -> String {
+    let s = seconds.round() as u64;
+    let (h, m, s) = (s / 3600, (s % 3600) / 60, s % 60);
+    match (h, m) {
+        (0, 0) => format!("{s} s"),
+        (0, _) => format!("{m}m {s:02}s"),
+        _ => format!("{h}h {m:02}m {s:02}s"),
+    }
+}
+
 /// Truncate `s` to at most `max` display columns, keeping the start and the end
 /// with a '…' in the middle (commands often differ at both ends, not just the
 /// start). The front keeps the extra column when `max` is even.
@@ -309,6 +320,14 @@ mod tests {
         assert_eq!(format_bytes(500), "500 B");
         assert_eq!(format_bytes(1024), "1.0 KB");
         assert_eq!(format_bytes(5 << 20), "5.0 MB");
+    }
+
+    #[test]
+    fn duration_formatting() {
+        assert_eq!(format_duration(0.4), "0 s");
+        assert_eq!(format_duration(42.4), "42 s");
+        assert_eq!(format_duration(154.2), "2m 34s");
+        assert_eq!(format_duration(3723.0), "1h 02m 03s");
     }
 
     #[test]

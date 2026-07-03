@@ -187,7 +187,6 @@ apply), or if `--no-calibrate` option is used.
 - [ ] multiple slots support in region mode, to allow multiple comparison
   inside same process or subtle timings 
 - [ ] pretty progress bars when -r is specified (low priority)
-- [ ] add an estimated end time when -r is specified
 - [ ] allow to define a target stddev (ie. run until you've reached ±1%)
 - [ ] allow to force a pattern-defined scheduling (strict round robin per worker, …)
 
@@ -220,6 +219,8 @@ apply), or if `--no-calibrate` option is used.
 - [x] `--estimator` to pick the reported central statistic: mean (default),
   median, or a percentile (`p90`, `p999` = 99.9th), applied to the time
   report, the relative speeds and the live display
+- [x] Live `ETA` line when `-r/--runs` is given (rate-based: elapsed wall time
+  scaled by the warmup+timed runs still to go), refreshed with the counters
 
 ### [0.1.0] 2026-06-05
 

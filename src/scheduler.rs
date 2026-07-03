@@ -9,7 +9,9 @@ use tracing::{debug, warn};
 use crate::command::Command;
 use crate::display::{DisplayMessage, spawn_display, term_width};
 use crate::executor::{allowed_cpus, partition, pin_thread};
-use crate::format::{CounterRow, Relative, auto_unit, format_bytes, format_time, render_counters};
+use crate::format::{
+    CounterRow, Relative, auto_unit, format_bytes, format_duration, format_time, render_counters,
+};
 use crate::measurement::{BenchmarkResult, Execution};
 use crate::options::Options;
 
@@ -110,6 +112,15 @@ fn calibrate(
     })
 }
 
+/// Whole-run progress for the rate-based ETA: tracked only when --runs is
+/// given, so the total number of tasks (warmup + timed, every command) is
+/// known upfront.
+struct Progress {
+    total: u64,
+    done: u64,
+    started: Instant,
+}
+
 /// Per-command scheduling state, owned and mutated only by the pump.
 struct CmdState {
     spec: Arc<CmdSpec>,
@@ -177,7 +188,12 @@ fn done_dispatching(s: &CmdState, interrupted: bool) -> bool {
 
 /// Render every command's live counter as one aligned block and send it to the
 /// display, so all rows share a unit and line up (see `render_counters`).
-fn publish_counters(states: &[CmdState], options: &Options, display_tx: &Sender<DisplayMessage>) {
+fn publish_counters(
+    states: &[CmdState],
+    progress: Option<&Progress>,
+    options: &Options,
+    display_tx: &Sender<DisplayMessage>,
+) {
     // (count, center, std) of every command's timed runs so far.
     let summaries: Vec<(u64, f64, Option<f64>)> = states
         .iter()
@@ -230,7 +246,18 @@ fn publish_counters(states: &[CmdState], options: &Options, display_tx: &Sender<
     // The display draws each counter as "   {msg}" then trims to one less than
     // the width, so reserve the 3-space indent and that final column.
     let budget = term_width().saturating_sub(4);
-    let lines = render_counters(&rows, options.time_unit, options.precision, budget);
+    let mut lines = render_counters(&rows, options.time_unit, options.precision, budget);
+    // Rate-based ETA: elapsed wall time scaled by the tasks still to run. The
+    // task rate absorbs hooks, warmups and parallelism, which the per-run
+    // measurements don't see.
+    if let Some(p) = progress
+        && p.done > 0
+        && p.done < p.total
+    {
+        let remaining =
+            p.started.elapsed().as_secs_f64() * (p.total - p.done) as f64 / p.done as f64;
+        lines.push(format!("ETA ~{}", format_duration(remaining)));
+    }
     let _ = display_tx.send(DisplayMessage::Counters(lines));
 }
 
@@ -437,6 +464,11 @@ pub fn run_benchmarks(
             let mut in_flight_total = 0usize;
             let mut rr = 0usize;
             let mut next_run_id = 0u64;
+            let mut progress = timed_remaining.map(|runs| Progress {
+                total: states.len() as u64 * (options.warmup + runs),
+                done: 0,
+                started: Instant::now(),
+            });
 
             fill(
                 &mut states,
@@ -452,6 +484,11 @@ pub fn run_benchmarks(
                 };
                 in_flight_total -= 1;
                 let intr = interrupted.load(Ordering::Relaxed);
+                if intr {
+                    progress = None; // the remaining runs won't happen: drop the ETA
+                } else if let Some(p) = &mut progress {
+                    p.done += 1;
+                }
 
                 let i = report.cmd_idx;
                 let mut publish = false;
@@ -508,7 +545,7 @@ pub fn run_benchmarks(
                     }
                 }
                 if publish {
-                    publish_counters(&states, options, &display_tx);
+                    publish_counters(&states, progress.as_ref(), options, &display_tx);
                 }
 
                 // Finalize a command once it stops producing work and drains.
@@ -518,7 +555,7 @@ pub fn run_benchmarks(
                     && states[i].in_flight == 0
                 {
                     states[i].completed = true;
-                    publish_counters(&states, options, &display_tx);
+                    publish_counters(&states, progress.as_ref(), options, &display_tx);
                     if let Some(cleanup) = &options.cleanup
                         && let Err(e) = options.execute(cleanup, false, None)
                     {
