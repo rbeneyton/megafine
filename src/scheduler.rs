@@ -119,8 +119,9 @@ struct CmdState {
     timed_remaining: Option<u64>,
     in_flight: u64,
     measurements: Vec<Execution>,
-    sum: f64,
-    sum_sq: f64,
+    /// Wall-clock times of `measurements`, kept sorted by inserting each new
+    /// value in place (percentile estimators read it directly).
+    sorted: Vec<f64>,
     max_rss: u64,
     last_update: Instant,
     completed: bool,
@@ -177,43 +178,40 @@ fn done_dispatching(s: &CmdState, interrupted: bool) -> bool {
 /// Render every command's live counter as one aligned block and send it to the
 /// display, so all rows share a unit and line up (see `render_counters`).
 fn publish_counters(states: &[CmdState], options: &Options, display_tx: &Sender<DisplayMessage>) {
-    // (count, mean, std) of every command's timed runs so far.
+    // (count, center, std) of every command's timed runs so far.
     let summaries: Vec<(u64, f64, Option<f64>)> = states
         .iter()
         .map(|s| {
-            let count = s.measurements.len() as u64;
-            let n = count as f64;
-            let mean = if count > 0 { s.sum / n } else { 0.0 };
-            let std = if count >= 2 {
-                Some((((s.sum_sq - s.sum * s.sum / n) / (n - 1.0)).max(0.0)).sqrt())
-            } else {
-                None
-            };
-            (count, mean, std)
+            let (_, std) = crate::stats::mean_stddev(&s.sorted);
+            (
+                s.measurements.len() as u64,
+                options.estimator.value(&s.sorted),
+                std,
+            )
         })
         .collect();
-    let (_, ref_mean, ref_std) = summaries[options.reference];
+    let (_, ref_center, ref_std) = summaries[options.reference];
 
     let rows: Vec<CounterRow> = states
         .iter()
         .zip(&summaries)
         .enumerate()
-        .map(|(i, (s, &(count, mean, std)))| {
+        .map(|(i, (s, &(count, center, std)))| {
             // Live counterpart of the final ranking, against the reference's
-            // current mean; absent until both sides have a measurement.
+            // current center; absent until both sides have a measurement.
             let relative = if states.len() < 2 {
                 None
             } else if i == options.reference {
                 Some(Relative::Reference)
-            } else if count > 0 && ref_mean > 0.0 {
+            } else if count > 0 && ref_center > 0.0 {
                 let stddev = match (std, ref_std) {
                     (Some(std), Some(ref_std)) => {
-                        Some(crate::stats::ratio_stddev(mean, std, ref_mean, ref_std))
+                        Some(crate::stats::ratio_stddev(center, std, ref_center, ref_std))
                     }
                     _ => None,
                 };
                 Some(Relative::Ratio {
-                    ratio: mean / ref_mean,
+                    ratio: center / ref_center,
                     stddev,
                 })
             } else {
@@ -222,7 +220,7 @@ fn publish_counters(states: &[CmdState], options: &Options, display_tx: &Sender<
             CounterRow {
                 label: &s.spec.label,
                 count,
-                mean,
+                center,
                 std,
                 peak_rss: s.max_rss,
                 relative,
@@ -372,8 +370,7 @@ pub fn run_benchmarks(
                         timed_remaining,
                         in_flight: 0,
                         measurements: Vec::new(),
-                        sum: 0.0,
-                        sum_sq: 0.0,
+                        sorted: Vec::new(),
                         max_rss: 0,
                         last_update: Instant::now() - COUNTER_REFRESH,
                         completed: false,
@@ -471,14 +468,14 @@ pub fn run_benchmarks(
                             abort_error = Some(e);
                         }
                         Ok(r) if !report.warmup && !intr && !aborted => {
-                            s.sum += r.wall_clock;
-                            s.sum_sq += r.wall_clock * r.wall_clock;
+                            let at = s.sorted.partition_point(|&t| t < r.wall_clock);
+                            s.sorted.insert(at, r.wall_clock);
                             s.max_rss = s.max_rss.max(r.max_rss);
                             s.measurements.push(r);
                             if let Some(base) = &baseline {
                                 let count = s.measurements.len();
                                 if count >= 2 {
-                                    let mean = s.sum / count as f64;
+                                    let mean = crate::stats::mean(&s.sorted);
                                     if mean < base.time {
                                         aborted = true;
                                         abort_error = Some(anyhow!(

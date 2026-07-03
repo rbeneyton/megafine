@@ -217,6 +217,9 @@ apply), or if `--no-calibrate` option is used.
 - [x] Dump the statistics collected so far when a run fails (non-zero return
   code), before reporting the error (in `--raw` mode stdout stays empty, so
   scripts cannot mistake partial ratios for complete results)
+- [x] `--estimator` to pick the reported central statistic: mean (default),
+  median, or a percentile (`p90`, `p999` = 99.9th), applied to the time
+  report, the relative speeds and the live display
 
 ### [0.1.0] 2026-06-05
 

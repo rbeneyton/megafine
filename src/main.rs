@@ -54,12 +54,12 @@ fn main() -> Result<()> {
         // On a failed run, keep stdout empty: partial ratios could be mistaken
         // for complete results by the scripts consuming them.
         if error.is_none() {
-            print_raw(&results, options.reference)?;
+            print_raw(&results, &options)?;
         }
     } else {
         print_results(&results, &options);
         if !reference_missing {
-            print_ranks(&results, options.reference);
+            print_ranks(&results, &options);
         }
     }
 
@@ -71,11 +71,11 @@ fn main() -> Result<()> {
 
 /// Print one ratio per line (command order, relative to the `reference`-th
 /// command), and nothing else, so stdout can be consumed directly by scripts.
-fn print_raw(results: &[BenchmarkResult], reference: usize) -> Result<()> {
+fn print_raw(results: &[BenchmarkResult], options: &Options) -> Result<()> {
     if results.len() < 2 {
         bail!("--raw needs measurements for at least 2 commands (run interrupted too early?)");
     }
-    let relative = compute(results, reference)
+    let relative = compute(results, options.reference, options.estimator)
         .context("could not compute relative speed (a benchmark time is zero)")?;
     for item in &relative {
         println!("{:.6}", item.ratio);
@@ -105,17 +105,25 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
             label
         );
 
-        let times = result.times(|e| e.wall_clock);
+        let mut times = result.times(|e| e.wall_clock);
         if times.is_empty() {
             println!("  {}", "no measurements collected".yellow());
             println!();
             continue;
         }
+        times.sort_unstable_by(f64::total_cmp);
 
-        let (mean, stddev) = stats::mean_stddev(&times);
-        let unit = options.time_unit.unwrap_or_else(|| auto_unit(mean));
-        let user = stats::mean(&result.times(|e| e.time_user));
-        let system = stats::mean(&result.times(|e| e.time_system));
+        // σ stays the sample stddev whatever the estimator (it describes the
+        // data's spread, not the estimator's uncertainty).
+        let center = options.estimator.value(&times);
+        let (_, stddev) = stats::mean_stddev(&times);
+        let unit = options.time_unit.unwrap_or_else(|| auto_unit(center));
+        let center_of = |mut v: Vec<f64>| {
+            v.sort_unstable_by(f64::total_cmp);
+            options.estimator.value(&v)
+        };
+        let user = center_of(result.times(|e| e.time_user));
+        let system = center_of(result.times(|e| e.time_system));
         let peak = result
             .measurements
             .iter()
@@ -127,9 +135,9 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
             Some(stddev) => {
                 println!(
                     "  Time ({} ± {}):  {} ± {}    [User: {}, System: {}, Peak: {}]",
-                    "mean".green().bold(),
+                    options.estimator.to_string().green().bold(),
                     "σ".green(),
-                    format_time(mean, unit).green().bold(),
+                    format_time(center, unit).green().bold(),
                     format_time(stddev, unit).green(),
                     format_time(user, unit).blue(),
                     format_time(system, unit).blue(),
@@ -148,7 +156,7 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
                 println!(
                     "  Time ({}):  {}    [User: {}, System: {}, Peak: {}]   {} run",
                     "abs".green().bold(),
-                    format_time(mean, unit).green().bold(),
+                    format_time(center, unit).green().bold(),
                     format_time(user, unit).blue(),
                     format_time(system, unit).blue(),
                     format_bytes(peak).blue(),
@@ -161,12 +169,12 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
     }
 }
 
-fn print_ranks(results: &[BenchmarkResult], reference: usize) {
+fn print_ranks(results: &[BenchmarkResult], options: &Options) {
     if results.len() < 2 {
         return;
     }
 
-    let Some(relative) = compute(results, reference) else {
+    let Some(relative) = compute(results, options.reference, options.estimator) else {
         eprintln!(
             "{}: could not compute relative speed (a benchmark time is zero)",
             "Note".red()
@@ -174,9 +182,9 @@ fn print_ranks(results: &[BenchmarkResult], reference: usize) {
         return;
     };
 
-    // Rank by mean (1 = fastest) while keeping the rows in command order.
+    // Rank by central time (1 = fastest) while keeping the rows in command order.
     let mut order: Vec<usize> = (0..relative.len()).collect();
-    order.sort_by(|&a, &b| relative[a].mean.total_cmp(&relative[b].mean));
+    order.sort_by(|&a, &b| relative[a].center.total_cmp(&relative[b].center));
     let mut rank = vec![0usize; relative.len()];
     for (pos, &i) in order.iter().enumerate() {
         rank[i] = pos + 1;

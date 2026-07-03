@@ -105,7 +105,7 @@ pub fn truncate(s: &str, max: usize) -> String {
 pub enum Relative {
     /// This row is the reference command itself.
     Reference,
-    /// `mean / reference_mean`, with the propagated uncertainty on it when
+    /// `center / reference_center`, with the propagated uncertainty on it when
     /// both stddevs are known.
     Ratio { ratio: f64, stddev: Option<f64> },
 }
@@ -114,7 +114,8 @@ pub enum Relative {
 pub struct CounterRow<'a> {
     pub label: &'a str,
     pub count: u64,
-    pub mean: f64,
+    /// The estimator's central value (mean or percentile) of the times so far.
+    pub center: f64,
     pub std: Option<f64>,
     pub peak_rss: u64,
     /// Standing against the reference command, when it can already be shown.
@@ -141,7 +142,7 @@ pub fn render_counters(
     }
 
     let time_unit =
-        forced_unit.unwrap_or_else(|| present.iter().map(|r| auto_unit(r.mean)).min().unwrap());
+        forced_unit.unwrap_or_else(|| present.iter().map(|r| auto_unit(r.center)).min().unwrap());
     let suffix = time_unit.suffix();
     let rss_unit = present
         .iter()
@@ -159,9 +160,9 @@ pub fn render_counters(
         .map(|r| r.count.to_string().len())
         .max()
         .unwrap();
-    let mean_w = present
+    let center_w = present
         .iter()
-        .map(|r| time_value(r.mean, time_unit).len())
+        .map(|r| time_value(r.center, time_unit).len())
         .max()
         .unwrap();
     let std_w = present
@@ -218,7 +219,7 @@ pub fn render_counters(
     // Cap the label column so the duration columns that follow it stay visible
     // within `budget`. The tail width is fixed once the columns above are known.
     let suffix_w = suffix.chars().count();
-    let fixed_tail = 2 + count_w + 1 + 4 + 2 + mean_w + 1 + suffix_w;
+    let fixed_tail = 2 + count_w + 1 + 4 + 2 + center_w + 1 + suffix_w;
     let std_tail = std_w.map_or(0, |sw| 3 + sw + 1 + suffix_w);
     let peak_tail = match (rss_unit, rss_w) {
         (Some(u), Some(rw)) => 7 + rw + 1 + BYTE_UNITS[u].chars().count(),
@@ -241,9 +242,9 @@ pub fn render_counters(
             }
             let runs = if x.count == 1 { "run" } else { "runs" };
             let mut line = format!(
-                "{label:<label_w$}  {:>count_w$} {runs:<4}  {:>mean_w$} {suffix}",
+                "{label:<label_w$}  {:>count_w$} {runs:<4}  {:>center_w$} {suffix}",
                 x.count,
-                time_value(x.mean, time_unit),
+                time_value(x.center, time_unit),
             );
             // Reserve the `± σ` segment on every row so the peak column aligns
             // even while a freshly-started command still has a single run.
@@ -333,14 +334,14 @@ mod tests {
     /// A `CounterRow` without peak RSS, so the relative column follows the times.
     fn counter_row(
         count: u64,
-        mean: f64,
+        center: f64,
         std: Option<f64>,
         relative: Option<Relative>,
     ) -> CounterRow<'static> {
         CounterRow {
             label: "x",
             count,
-            mean,
+            center,
             std,
             peak_rss: 0,
             relative,

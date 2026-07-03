@@ -5,6 +5,7 @@ use tracing::debug;
 
 use crate::cli::Cli;
 use crate::format::TimeUnit;
+use crate::stats::Estimator;
 
 pub struct Options {
     pub jobs: usize,
@@ -17,6 +18,8 @@ pub struct Options {
     pub conclude: Option<String>,
     pub cleanup: Option<String>,
     pub time_unit: Option<TimeUnit>,
+    /// Central-value statistic reported for times and relative speeds.
+    pub estimator: Estimator,
     /// Time only the command's `megafine_start()`/`megafine_stop()` region.
     pub region: bool,
     /// Calibrate the measurement floor against `/bin/true` before timing.
@@ -74,6 +77,19 @@ impl Options {
             })
             .transpose()?;
 
+        let estimator = cli
+            .estimator
+            .as_deref()
+            .map(|s| {
+                Estimator::parse(s).with_context(|| {
+                    format!(
+                        "invalid estimator '{s}' (use mean, median, or a percentile like p90 or p999)"
+                    )
+                })
+            })
+            .transpose()?
+            .unwrap_or(Estimator::Mean);
+
         if let Some(0) = cli.runs {
             bail!("--runs must be at least 1");
         }
@@ -109,6 +125,7 @@ impl Options {
             conclude: cli.conclude.clone(),
             cleanup: cli.cleanup.clone(),
             time_unit,
+            estimator,
             region: cli.region,
             calibrate: !cli.region && !cli.no_calibrate,
             pin: !cli.no_pin,
@@ -157,6 +174,18 @@ mod tests {
     #[test]
     fn runs_zero_rejected() {
         assert!(opts(&["-r", "0", "a"]).is_err());
+    }
+
+    #[test]
+    fn estimator_defaults_to_mean() {
+        assert!(opts(&["a"]).unwrap().estimator == Estimator::Mean);
+    }
+
+    #[test]
+    fn estimator_parsing() {
+        let e = opts(&["--estimator", "p999", "a"]).unwrap().estimator;
+        assert!(e == Estimator::Percentile(99.9));
+        assert!(opts(&["--estimator", "avg", "a"]).is_err());
     }
 
     #[test]

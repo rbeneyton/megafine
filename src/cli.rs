@@ -90,6 +90,11 @@ pub struct Cli {
     #[arg(short = 'u', long, value_name = "UNIT", help_heading = "Output")]
     pub time_unit: Option<String>,
 
+    /// Central-value statistic for times and relative speeds: mean, median,
+    /// or a percentile (p90, p999 = 99.9th) [default: mean].
+    #[arg(long, value_name = "ESTIMATOR", help_heading = "Output")]
+    pub estimator: Option<String>,
+
     /// Print only the relative-speed ratios (one per line, command order,
     /// reference = first command or --reference) on stdout, for scripts.
     #[arg(long, help_heading = "Output")]

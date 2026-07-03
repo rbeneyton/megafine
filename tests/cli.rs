@@ -266,6 +266,33 @@ fn conclude_runs_after_each_run_with_its_run_id() {
 }
 
 #[test]
+fn estimator_labels_the_time() {
+    let out = run(&[
+        "--estimator",
+        "p90",
+        "-r",
+        "3",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("p90"), "stdout: {s}");
+}
+
+#[test]
+fn invalid_estimator_errors() {
+    let out = run(&["--estimator", "avg", "-r", "1", "--no-calibrate", "a"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("invalid estimator"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn raw_with_one_command_errors() {
     let out = run(&["--raw", "-r", "2", "--no-calibrate", "sleep 0.02"]);
     assert!(!out.status.success());
