@@ -242,3 +242,4 @@ apply), or if `--no-calibrate` option is used.
 - [x] Read commands from stdin (`-`)
 - [x] Worker sandboxing via cpu affinity (cpuset?)
 - [x] Proper outputs truncate & alignment
+- [x] Time decimal-digit selection (`--precision`)

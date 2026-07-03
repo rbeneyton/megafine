@@ -90,6 +90,15 @@ pub struct Cli {
     #[arg(short = 'u', long, value_name = "UNIT", help_heading = "Output")]
     pub time_unit: Option<String>,
 
+    /// Digits after the decimal point for displayed times.
+    #[arg(
+        long,
+        value_name = "DIGITS",
+        default_value_t = 3,
+        help_heading = "Output"
+    )]
+    pub precision: usize,
+
     /// Central-value statistic for times and relative speeds: mean, median,
     /// or a percentile (p90, p999 = 99.9th) [default: mean].
     #[arg(long, value_name = "ESTIMATOR", help_heading = "Output")]

@@ -118,6 +118,7 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
         let center = options.estimator.value(&times);
         let (_, stddev) = stats::mean_stddev(&times);
         let unit = options.time_unit.unwrap_or_else(|| auto_unit(center));
+        let precision = options.precision;
         let center_of = |mut v: Vec<f64>| {
             v.sort_unstable_by(f64::total_cmp);
             options.estimator.value(&v)
@@ -137,18 +138,18 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
                     "  Time ({} ± {}):  {} ± {}    [User: {}, System: {}, Peak: {}]",
                     options.estimator.to_string().green().bold(),
                     "σ".green(),
-                    format_time(center, unit).green().bold(),
-                    format_time(stddev, unit).green(),
-                    format_time(user, unit).blue(),
-                    format_time(system, unit).blue(),
+                    format_time(center, unit, precision).green().bold(),
+                    format_time(stddev, unit, precision).green(),
+                    format_time(user, unit, precision).blue(),
+                    format_time(system, unit, precision).blue(),
                     format_bytes(peak).blue(),
                 );
                 println!(
                     "  Range ({} … {}):  {} … {}    {} runs",
                     "min".cyan(),
                     "max".purple(),
-                    format_time(stats::min(&times), unit).cyan(),
-                    format_time(stats::max(&times), unit).purple(),
+                    format_time(stats::min(&times), unit, precision).cyan(),
+                    format_time(stats::max(&times), unit, precision).purple(),
                     times.len(),
                 );
             }
@@ -156,9 +157,9 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
                 println!(
                     "  Time ({}):  {}    [User: {}, System: {}, Peak: {}]   {} run",
                     "abs".green().bold(),
-                    format_time(center, unit).green().bold(),
-                    format_time(user, unit).blue(),
-                    format_time(system, unit).blue(),
+                    format_time(center, unit, precision).green().bold(),
+                    format_time(user, unit, precision).blue(),
+                    format_time(system, unit, precision).blue(),
                     format_bytes(peak).blue(),
                     times.len(),
                 );

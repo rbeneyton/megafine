@@ -282,6 +282,25 @@ fn estimator_labels_the_time() {
 }
 
 #[test]
+fn precision_controls_decimals() {
+    let out = run(&[
+        "--precision",
+        "1",
+        "-u",
+        "s",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("0.0 s"), "stdout: {s}");
+    assert!(!s.contains("0.020 s"), "stdout: {s}");
+}
+
+#[test]
 fn invalid_estimator_errors() {
     let out = run(&["--estimator", "avg", "-r", "1", "--no-calibrate", "a"]);
     assert!(!out.status.success());

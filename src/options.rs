@@ -18,6 +18,8 @@ pub struct Options {
     pub conclude: Option<String>,
     pub cleanup: Option<String>,
     pub time_unit: Option<TimeUnit>,
+    /// Digits after the decimal point for displayed times.
+    pub precision: usize,
     /// Central-value statistic reported for times and relative speeds.
     pub estimator: Estimator,
     /// Time only the command's `megafine_start()`/`megafine_stop()` region.
@@ -125,6 +127,7 @@ impl Options {
             conclude: cli.conclude.clone(),
             cleanup: cli.cleanup.clone(),
             time_unit,
+            precision: cli.precision,
             estimator,
             region: cli.region,
             calibrate: !cli.region && !cli.no_calibrate,

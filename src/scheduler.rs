@@ -230,7 +230,7 @@ fn publish_counters(states: &[CmdState], options: &Options, display_tx: &Sender<
     // The display draws each counter as "   {msg}" then trims to one less than
     // the width, so reserve the 3-space indent and that final column.
     let budget = term_width().saturating_sub(4);
-    let lines = render_counters(&rows, options.time_unit, budget);
+    let lines = render_counters(&rows, options.time_unit, options.precision, budget);
     let _ = display_tx.send(DisplayMessage::Counters(lines));
 }
 
@@ -481,8 +481,12 @@ pub fn run_benchmarks(
                                         abort_error = Some(anyhow!(
                                             "'{}' mean {} is below the /bin/true floor {} : measurement too low to be precise (dominated by spawn/measurement overhead). You can remove this check by using --no-calibrate cli options.",
                                             s.spec.label,
-                                            format_time(mean, auto_unit(mean)),
-                                            format_time(base.time, auto_unit(base.time)),
+                                            format_time(mean, auto_unit(mean), options.precision),
+                                            format_time(
+                                                base.time,
+                                                auto_unit(base.time),
+                                                options.precision
+                                            ),
                                         ));
                                     } else if s.max_rss < base.rss {
                                         aborted = true;

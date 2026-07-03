@@ -44,12 +44,12 @@ pub fn auto_unit(seconds: f64) -> TimeUnit {
 }
 
 /// Just the numeric part of a duration in `unit` (no suffix), for column layout.
-fn time_value(seconds: f64, unit: TimeUnit) -> String {
-    format!("{:.3}", seconds * unit.factor())
+fn time_value(seconds: f64, unit: TimeUnit, precision: usize) -> String {
+    format!("{:.precision$}", seconds * unit.factor())
 }
 
-pub fn format_time(seconds: f64, unit: TimeUnit) -> String {
-    format!("{} {}", time_value(seconds, unit), unit.suffix())
+pub fn format_time(seconds: f64, unit: TimeUnit, precision: usize) -> String {
+    format!("{} {}", time_value(seconds, unit, precision), unit.suffix())
 }
 
 const BYTE_UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
@@ -128,6 +128,7 @@ pub struct CounterRow<'a> {
 pub fn render_counters(
     rows: &[CounterRow],
     forced_unit: Option<TimeUnit>,
+    precision: usize,
     budget: usize,
 ) -> Vec<String> {
     let present: Vec<&CounterRow> = rows.iter().filter(|r| r.count > 0).collect();
@@ -162,12 +163,12 @@ pub fn render_counters(
         .unwrap();
     let center_w = present
         .iter()
-        .map(|r| time_value(r.center, time_unit).len())
+        .map(|r| time_value(r.center, time_unit, precision).len())
         .max()
         .unwrap();
     let std_w = present
         .iter()
-        .filter_map(|r| r.std.map(|s| time_value(s, time_unit).len()))
+        .filter_map(|r| r.std.map(|s| time_value(s, time_unit, precision).len()))
         .max();
     let rss_w = rss_unit.map(|u| {
         present
@@ -244,15 +245,16 @@ pub fn render_counters(
             let mut line = format!(
                 "{label:<label_w$}  {:>count_w$} {runs:<4}  {:>center_w$} {suffix}",
                 x.count,
-                time_value(x.center, time_unit),
+                time_value(x.center, time_unit, precision),
             );
             // Reserve the `± σ` segment on every row so the peak column aligns
             // even while a freshly-started command still has a single run.
             if let Some(sw) = std_w {
                 match x.std {
-                    Some(std) => {
-                        line.push_str(&format!(" ± {:>sw$} {suffix}", time_value(std, time_unit)))
-                    }
+                    Some(std) => line.push_str(&format!(
+                        " ± {:>sw$} {suffix}",
+                        time_value(std, time_unit, precision)
+                    )),
                     None => line.push_str(&" ".repeat(3 + sw + 1 + suffix.chars().count())),
                 }
             }
@@ -296,8 +298,10 @@ mod tests {
 
     #[test]
     fn time_formatting() {
-        assert_eq!(format_time(0.0015, TimeUnit::Millisecond), "1.500 ms");
-        assert_eq!(format_time(2.0, TimeUnit::Second), "2.000 s");
+        assert_eq!(format_time(0.0015, TimeUnit::Millisecond, 3), "1.500 ms");
+        assert_eq!(format_time(2.0, TimeUnit::Second, 3), "2.000 s");
+        assert_eq!(format_time(0.0015, TimeUnit::Millisecond, 1), "1.5 ms");
+        assert_eq!(format_time(2.0, TimeUnit::Second, 0), "2 s");
     }
 
     #[test]
@@ -362,7 +366,7 @@ mod tests {
                 }),
             ),
         ];
-        let lines = render_counters(&rows, None, 200);
+        let lines = render_counters(&rows, None, 3, 200);
         assert!(lines[0].ends_with("  reference"), "{}", lines[0]);
         assert!(lines[1].ends_with("  +10.44% (± 5.87)"), "{}", lines[1]);
     }
@@ -392,7 +396,7 @@ mod tests {
                 }),
             ),
         ];
-        let lines = render_counters(&rows, None, 200);
+        let lines = render_counters(&rows, None, 3, 200);
         assert!(lines[1].ends_with("    +9.50%"), "{}", lines[1]);
         assert!(lines[2].ends_with("  +123.40% (± 12.30)"), "{}", lines[2]);
     }
@@ -400,7 +404,7 @@ mod tests {
     #[test]
     fn counters_without_relative_have_no_column() {
         let rows = [counter_row(2, 0.5, Some(0.1), None)];
-        let lines = render_counters(&rows, None, 200);
+        let lines = render_counters(&rows, None, 3, 200);
         assert!(lines[0].ends_with("ms"), "{}", lines[0]);
     }
 }
