@@ -18,7 +18,7 @@ use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::Cli;
-use crate::format::{auto_unit, format_bytes, format_time, truncate};
+use crate::format::{auto_unit, format_bytes, format_time, relative_cell, truncate};
 use crate::measurement::{BenchmarkResult, compute};
 use crate::options::Options;
 
@@ -228,16 +228,7 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
             } else {
                 // Percentage difference from the reference, with the propagated
                 // uncertainty (both in percentage points).
-                let pct = format!("{:+.2}", (item.ratio - 1.0) * 100.0);
-                match (item.stddev, unc_w) {
-                    (Some(stddev), Some(uw)) => {
-                        format!(
-                            ": {pct:>pct_w$}% (± {:>uw$})",
-                            format!("{:.2}", stddev * 100.0)
-                        )
-                    }
-                    _ => format!(": {pct:>pct_w$}%"),
-                }
+                format!(": {}", relative_cell(item.ratio, item.stddev, pct_w, unc_w))
             };
             let tag_w = if i == fastest || i == slowest {
                 " (fastest)".chars().count()

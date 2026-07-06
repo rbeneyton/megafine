@@ -124,6 +124,24 @@ pub enum Relative {
     Ratio { ratio: f64, stddev: Option<f64> },
 }
 
+/// The `+x.xx% (± u.uu)` relative-speed cell, shared by the live counters and
+/// the final ranking. Right-aligned to `pct_w`/`unc_w` so the decimal points
+/// line up down a column; the uncertainty appears only when this row has one
+/// and the column exists.
+pub fn relative_cell(
+    ratio: f64,
+    stddev: Option<f64>,
+    pct_w: usize,
+    unc_w: Option<usize>,
+) -> String {
+    let pct = format!("{:+.2}", (ratio - 1.0) * 100.0);
+    let mut cell = format!("{pct:>pct_w$}%");
+    if let (Some(stddev), Some(uw)) = (stddev, unc_w) {
+        cell.push_str(&format!(" (± {:>uw$})", format!("{:.2}", stddev * 100.0)));
+    }
+    cell
+}
+
 /// One command's live progress, in raw values; rendered together with its peers.
 pub struct CounterRow<'a> {
     pub label: &'a str,
@@ -220,12 +238,7 @@ pub fn render_counters(
             _ if r.count == 0 => String::new(),
             (Some(Relative::Reference), _) => "reference".to_string(),
             (Some(Relative::Ratio { ratio, stddev }), Some(pw)) => {
-                let pct = format!("{:+.2}", (ratio - 1.0) * 100.0);
-                let mut cell = format!("{pct:>pw$}%");
-                if let (Some(stddev), Some(uw)) = (stddev, unc_w) {
-                    cell.push_str(&format!(" (± {:>uw$})", format!("{:.2}", stddev * 100.0)));
-                }
-                cell
+                relative_cell(ratio, stddev, pw, unc_w)
             }
             _ => String::new(),
         })
