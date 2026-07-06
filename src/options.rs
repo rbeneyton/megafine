@@ -1,22 +1,28 @@
-use std::path::PathBuf;
-
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use tracing::debug;
 
 use crate::cli::Cli;
 use crate::format::TimeUnit;
 use crate::stats::Estimator;
 
+/// A command line pre-parsed into the argv it will be spawned with, so the
+/// parse happens once at startup (fail-fast) instead of on every run.
+pub struct Invocation {
+    /// The original command line, for labels and error messages.
+    pub line: String,
+    pub argv: Vec<String>,
+}
+
 pub struct Options {
     pub jobs: usize,
     pub warmup: u64,
     pub runs: Option<u64>,
     /// `None` runs commands directly; `Some(path)` runs them through that shell.
-    pub shell: Option<PathBuf>,
-    pub setup: Option<String>,
-    pub prepare: Option<String>,
-    pub conclude: Option<String>,
-    pub cleanup: Option<String>,
+    pub shell: Option<String>,
+    pub setup: Option<Invocation>,
+    pub prepare: Option<Invocation>,
+    pub conclude: Option<Invocation>,
+    pub cleanup: Option<Invocation>,
     pub time_unit: Option<TimeUnit>,
     /// Digits after the decimal point for displayed times.
     pub precision: usize,
@@ -43,6 +49,26 @@ pub fn all_cores() -> usize {
 }
 
 impl Options {
+    /// Parse `line` into the argv `execute` will spawn: `[shell, -c, line]`
+    /// when a shell is configured, otherwise split into words here, once.
+    pub fn invocation(&self, line: &str) -> Result<Invocation> {
+        let argv = match &self.shell {
+            None => {
+                let parts = shell_words::split(line)
+                    .with_context(|| format!("could not parse command '{line}'"))?;
+                if parts.is_empty() {
+                    bail!("empty command '{line}'");
+                }
+                parts
+            }
+            Some(shell) => vec![shell.clone(), "-c".into(), line.into()],
+        };
+        Ok(Invocation {
+            line: line.to_string(),
+            argv,
+        })
+    }
+
     pub fn from_cli(cli: &Cli) -> Result<Self> {
         let jobs = match cli.jobs {
             None | Some(0) => {
@@ -65,6 +91,10 @@ impl Options {
             let exe = std::fs::read_link(&exe)
                 .with_context(|| format!("could not resolve the current shell via {exe}"))?;
             debug!("Current shell is {}", exe.display());
+            let exe = exe
+                .into_os_string()
+                .into_string()
+                .map_err(|p| anyhow!("the shell path {p:?} is not valid UTF-8"))?;
             Some(exe)
         } else {
             None
@@ -117,15 +147,15 @@ impl Options {
             Some(n) => n - 1,
         };
 
-        Ok(Options {
+        let options = Options {
             jobs,
             warmup: cli.warmup,
             runs: cli.runs,
             shell,
-            setup: cli.setup.clone(),
-            prepare: cli.prepare.clone(),
-            conclude: cli.conclude.clone(),
-            cleanup: cli.cleanup.clone(),
+            setup: None,
+            prepare: None,
+            conclude: None,
+            cleanup: None,
             time_unit,
             precision: cli.precision,
             estimator,
@@ -135,6 +165,34 @@ impl Options {
             pin_reserved: cli.pin_reserved,
             raw: cli.raw,
             reference,
+        };
+        // The hooks are parsed second: `invocation` needs the shell above.
+        let setup = cli
+            .setup
+            .as_deref()
+            .map(|s| options.invocation(s))
+            .transpose()?;
+        let prepare = cli
+            .prepare
+            .as_deref()
+            .map(|s| options.invocation(s))
+            .transpose()?;
+        let conclude = cli
+            .conclude
+            .as_deref()
+            .map(|s| options.invocation(s))
+            .transpose()?;
+        let cleanup = cli
+            .cleanup
+            .as_deref()
+            .map(|s| options.invocation(s))
+            .transpose()?;
+        Ok(Options {
+            setup,
+            prepare,
+            conclude,
+            cleanup,
+            ..options
         })
     }
 }

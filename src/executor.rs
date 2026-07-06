@@ -9,33 +9,13 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 
 use crate::measurement::Execution;
-use crate::options::Options;
+use crate::options::{Invocation, Options};
 
 /// Largest amount of a failing command's stderr to keep for the error message.
 const STDERR_CAP: usize = 8 * 1024;
 
 impl Options {
-    fn build(&self, command_line: &str) -> Result<Command> {
-        match &self.shell {
-            None => {
-                let parts = shell_words::split(command_line)
-                    .with_context(|| format!("could not parse command '{command_line}'"))?;
-                let (program, args) = parts
-                    .split_first()
-                    .with_context(|| format!("empty command '{command_line}'"))?;
-                let mut command = Command::new(program);
-                command.args(args);
-                Ok(command)
-            }
-            Some(path) => {
-                let mut command = Command::new(path);
-                command.arg("-c").arg(command_line);
-                Ok(command)
-            }
-        }
-    }
-
-    /// Execute the command line and measure its resource usage. stdout is
+    /// Execute the pre-parsed command and measure its resource usage. stdout is
     /// discarded; stderr is drained as it is produced (so it can never fill the
     /// pipe and block the child) and reported if the command exits non-zero.
     ///
@@ -46,12 +26,14 @@ impl Options {
     /// `run_id`, when set, is exposed to the child as `MEGAFINE_RUN_ID`.
     pub fn execute(
         &self,
-        command_line: &str,
+        inv: &Invocation,
         region: bool,
         run_id: Option<u64>,
     ) -> Result<Execution> {
-        let mut command = self.build(command_line)?;
+        let command_line = &inv.line;
+        let mut command = Command::new(&inv.argv[0]);
         command
+            .args(&inv.argv[1..])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());

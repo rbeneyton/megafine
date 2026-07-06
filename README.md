@@ -222,6 +222,7 @@ apply), or if `--no-calibrate` option is used.
 - [x] Live `ETA` line when `-r/--runs` is given (rate-based: elapsed wall time
   scaled by the warmup+timed runs still to go), refreshed with the counters
 - [x] Avoid flooding refresh operations
+- [x] Decode commands once at startup
 
 ### [0.1.0] 2026-06-05
 

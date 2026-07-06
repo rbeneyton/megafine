@@ -13,7 +13,7 @@ use crate::format::{
     CounterRow, Relative, auto_unit, format_bytes, format_duration, format_time, render_counters,
 };
 use crate::measurement::{BenchmarkResult, Execution};
-use crate::options::Options;
+use crate::options::{Invocation, Options};
 
 /// Minimum delay between live counter updates sent to the display.
 const COUNTER_REFRESH: Duration = Duration::from_millis(100);
@@ -21,9 +21,7 @@ const COUNTER_REFRESH: Duration = Duration::from_millis(100);
 /// A command's immutable identity, shared with every task that runs it.
 struct CmdSpec {
     label: Box<str>,
-    command_line: Box<str>,
-    prepare: Option<Box<str>>,
-    conclude: Option<Box<str>>,
+    inv: Invocation,
 }
 
 struct Task {
@@ -56,15 +54,10 @@ struct Baseline {
 /// channel; an empty vec means `/bin/true` itself never succeeded.
 fn calibration_round(
     n: usize,
+    spec: &Arc<CmdSpec>,
     job_tx: &Sender<Task>,
     result_rx: &Receiver<RunReport>,
 ) -> Option<(Vec<f64>, Vec<u64>)> {
-    let spec = Arc::new(CmdSpec {
-        label: Box::from("/bin/true"),
-        command_line: Box::from("/bin/true"),
-        prepare: None,
-        conclude: None,
-    });
     for _ in 0..n {
         let task = Task {
             cmd_idx: 0,
@@ -93,11 +86,12 @@ fn calibration_round(
 /// the floor reflects warm steady state). `None` if `/bin/true` can't run.
 fn calibrate(
     jobs: usize,
+    spec: &Arc<CmdSpec>,
     job_tx: &Sender<Task>,
     result_rx: &Receiver<RunReport>,
 ) -> Option<Baseline> {
-    calibration_round(jobs, job_tx, result_rx)?; // warmup, discarded
-    let (times, rss) = calibration_round(jobs, job_tx, result_rx)?;
+    calibration_round(jobs, spec, job_tx, result_rx)?; // warmup, discarded
+    let (times, rss) = calibration_round(jobs, spec, job_tx, result_rx)?;
     if times.is_empty() {
         return None;
     }
@@ -138,13 +132,17 @@ struct CmdState {
 /// from any of them surfaces as an `Err`.
 fn run_task(options: &Options, task: &Task) -> Result<Execution> {
     let run_id = (!task.calibration).then_some(task.run_id);
-    if let Some(prepare) = &task.spec.prepare {
+    if !task.calibration
+        && let Some(prepare) = &options.prepare
+    {
         options
             .execute(prepare, false, run_id)
             .context("the prepare command failed")?;
     }
-    let execution = options.execute(&task.spec.command_line, options.region, run_id)?;
-    if let Some(conclude) = &task.spec.conclude {
+    let execution = options.execute(&task.spec.inv, options.region, run_id)?;
+    if !task.calibration
+        && let Some(conclude) = &options.conclude
+    {
         options
             .execute(conclude, false, run_id)
             .context("the conclude command failed")?;
@@ -305,6 +303,18 @@ pub fn run_benchmarks(
 
     let command_labels: Vec<String> = commands.iter().map(|c| c.label().to_string()).collect();
 
+    // Parse every command line once, before any thread (or --setup) runs, so a
+    // malformed command aborts upfront instead of at its first execution.
+    let specs: Vec<Arc<CmdSpec>> = commands
+        .iter()
+        .map(|command| {
+            Ok(Arc::new(CmdSpec {
+                label: Box::from(command.label()),
+                inv: options.invocation(command.line)?,
+            }))
+        })
+        .collect::<Result<_>>()?;
+
     let (job_tx, job_rx) = bounded::<Task>(jobs);
     let (result_tx, result_rx) = unbounded::<RunReport>();
     let (display_tx, display_rx) = unbounded::<DisplayMessage>();
@@ -346,7 +356,11 @@ pub fn run_benchmarks(
             // }}}
             // {{{ Calibrate measurement
             let baseline = if options.calibrate {
-                calibrate(jobs, &job_tx, &result_rx)
+                let spec = Arc::new(CmdSpec {
+                    label: Box::from("/bin/true"),
+                    inv: options.invocation("/bin/true")?,
+                });
+                calibrate(jobs, &spec, &job_tx, &result_rx)
             } else {
                 None
             };
@@ -364,27 +378,19 @@ pub fn run_benchmarks(
             };
             // }}}
             // {{{ Results vec
-            let mut states: Vec<_> = commands
+            let mut states: Vec<_> = specs
                 .into_iter()
-                .map(|command| {
-                    let spec = Arc::new(CmdSpec {
-                        label: Box::from(command.label()),
-                        command_line: Box::from(command.line),
-                        prepare: options.prepare.as_deref().map(Box::from),
-                        conclude: options.conclude.as_deref().map(Box::from),
-                    });
-                    CmdState {
-                        spec,
-                        warmup_remaining: options.warmup,
-                        warmup_in_flight: 0,
-                        timed_remaining,
-                        in_flight: 0,
-                        measurements: Vec::new(),
-                        sorted: Vec::new(),
-                        max_rss: 0,
-                        last_update: Instant::now() - COUNTER_REFRESH,
-                        completed: false,
-                    }
+                .map(|spec| CmdState {
+                    spec,
+                    warmup_remaining: options.warmup,
+                    warmup_in_flight: 0,
+                    timed_remaining,
+                    in_flight: 0,
+                    measurements: Vec::new(),
+                    sorted: Vec::new(),
+                    max_rss: 0,
+                    last_update: Instant::now() - COUNTER_REFRESH,
+                    completed: false,
                 })
                 .collect();
             // }}}
