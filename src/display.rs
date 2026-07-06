@@ -7,13 +7,14 @@ use flume::RecvTimeoutError;
 use crate::format::truncate;
 
 /// Messages sent to the display thread. Workers address a worker line by index;
-/// feeders address a command counter line by index.
+/// feeders address a command counter line by index. The display stops when
+/// every sender is dropped (channel disconnection), so there is no explicit
+/// termination message.
 pub enum DisplayMessage {
     Start(usize, usize), // worker, command index
     Calibrate(usize),
     Idle(usize),
     Counters(Vec<String>),
-    Done,
 }
 
 /// What a worker line is showing.
@@ -61,11 +62,7 @@ pub fn spawn_display(
     spawn(move || {
         // Off a terminal (e.g. piped) we draw nothing and just wait for the end.
         if !stderr().is_terminal() {
-            while let Ok(msg) = rx.recv() {
-                if matches!(msg, DisplayMessage::Done) {
-                    break;
-                }
-            }
+            while rx.recv().is_ok() {}
             return;
         }
 
@@ -132,7 +129,7 @@ pub fn spawn_display(
                 Ok(DisplayMessage::Calibrate(w)) => worker_state[w] = WorkerState::Calibrating,
                 Ok(DisplayMessage::Idle(w)) => worker_state[w] = WorkerState::Idle,
                 Ok(DisplayMessage::Counters(lines)) => counter_msgs = lines,
-                Ok(DisplayMessage::Done) | Err(RecvTimeoutError::Disconnected) => {
+                Err(RecvTimeoutError::Disconnected) => {
                     // The cursor is parked at the block's top: erase the block
                     // and restore the cursor.
                     let mut out = stderr().lock();

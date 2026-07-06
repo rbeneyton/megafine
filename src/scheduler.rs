@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -37,11 +37,6 @@ struct Task {
     spec: Arc<CmdSpec>,
 }
 
-enum Job {
-    Run(Task),
-    Suicide,
-}
-
 struct RunReport {
     cmd_idx: usize,
     warmup: bool,
@@ -61,7 +56,7 @@ struct Baseline {
 /// channel; an empty vec means `/bin/true` itself never succeeded.
 fn calibration_round(
     n: usize,
-    job_tx: &Sender<Job>,
+    job_tx: &Sender<Task>,
     result_rx: &Receiver<RunReport>,
 ) -> Option<(Vec<f64>, Vec<u64>)> {
     let spec = Arc::new(CmdSpec {
@@ -78,7 +73,7 @@ fn calibration_round(
             run_id: 0,
             spec: spec.clone(),
         };
-        if job_tx.send(Job::Run(task)).is_err() {
+        if job_tx.send(task).is_err() {
             return None;
         }
     }
@@ -98,7 +93,7 @@ fn calibration_round(
 /// the floor reflects warm steady state). `None` if `/bin/true` can't run.
 fn calibrate(
     jobs: usize,
-    job_tx: &Sender<Job>,
+    job_tx: &Sender<Task>,
     result_rx: &Receiver<RunReport>,
 ) -> Option<Baseline> {
     calibration_round(jobs, job_tx, result_rx)?; // warmup, discarded
@@ -310,11 +305,10 @@ pub fn run_benchmarks(
 
     let command_labels: Vec<String> = commands.iter().map(|c| c.label().to_string()).collect();
 
-    let (job_tx, job_rx) = bounded::<Job>(jobs);
+    let (job_tx, job_rx) = bounded::<Task>(jobs);
     let (result_tx, result_rx) = unbounded::<RunReport>();
     let (display_tx, display_rx) = unbounded::<DisplayMessage>();
     let display = spawn_display(jobs, command_labels, display_rx);
-    let display_canary = &AtomicUsize::new(jobs);
 
     let outcome = std::thread::scope(
         move |scope| -> Result<(Vec<BenchmarkResult>, Option<anyhow::Error>), anyhow::Error> {
@@ -333,30 +327,19 @@ pub fn run_benchmarks(
                         // warn and continue unpinned rather than abort the run.
                         warn!(worker = w, error = %e, "could not pin worker to its CPUs");
                     }
-                    loop {
-                        match job_rx.recv() {
-                            Ok(Job::Run(task)) => {
-                                let _ = display_tx.send(if task.calibration {
-                                    DisplayMessage::Calibrate(w)
-                                } else {
-                                    DisplayMessage::Start(w, task.cmd_idx)
-                                });
-                                let outcome = run_task(options, &task);
-                                let _ = display_tx.send(DisplayMessage::Idle(w));
-                                let _ = result_tx.send(RunReport {
-                                    cmd_idx: task.cmd_idx,
-                                    warmup: task.warmup,
-                                    outcome,
-                                });
-                            }
-                            Ok(Job::Suicide) => {
-                                if display_canary.fetch_sub(1, Ordering::SeqCst) == 1 {
-                                    let _ = display_tx.send(DisplayMessage::Done);
-                                }
-                                break;
-                            }
-                            Err(_) => break,
-                        }
+                    while let Ok(task) = job_rx.recv() {
+                        let _ = display_tx.send(if task.calibration {
+                            DisplayMessage::Calibrate(w)
+                        } else {
+                            DisplayMessage::Start(w, task.cmd_idx)
+                        });
+                        let outcome = run_task(options, &task);
+                        let _ = display_tx.send(DisplayMessage::Idle(w));
+                        let _ = result_tx.send(RunReport {
+                            cmd_idx: task.cmd_idx,
+                            warmup: task.warmup,
+                            outcome,
+                        });
                     }
                 });
             }
@@ -452,7 +435,7 @@ pub fn run_benchmarks(
                         s.timed_remaining = Some(r - 1);
                     }
                     s.in_flight += 1;
-                    if job_tx.send(Job::Run(task)).is_err() {
+                    if job_tx.send(task).is_err() {
                         return false;
                     }
                     *in_flight_total += 1;
@@ -576,10 +559,10 @@ pub fn run_benchmarks(
             }
             // }}}
 
-            // Stop the workers; the scope joins them when this closure returns.
-            for _ in 0..jobs {
-                let _ = job_tx.send(Job::Suicide);
-            }
+            // Stop the workers: dropping the last job sender disconnects the
+            // channel, so every worker's recv() errors and its thread exits;
+            // the scope joins them when this closure returns.
+            drop(job_tx);
 
             let mut results = Vec::with_capacity(states.len());
             for s in states {
