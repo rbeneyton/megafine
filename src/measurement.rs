@@ -1,14 +1,10 @@
-use std::process::ExitStatus;
-
 use crate::stats;
 use crate::stats::Estimator;
 
-/// The complete outcome of one command execution: its exit status, wall-clock
-/// time, and the resource usage reported by `wait4`. Only successful runs are
+/// The measured outcome of one successful command execution: its wall-clock
+/// time and the resource usage reported by `wait4`. Only successful runs are
 /// kept in a `BenchmarkResult` (a non-zero exit is surfaced as an error instead).
 pub struct Execution {
-    /// Exit status of the process.
-    pub status: ExitStatus,
     /// Elapsed wall clock time, in seconds.
     pub wall_clock: f64,
     /// Time spent in user mode, in seconds.
@@ -93,7 +89,6 @@ pub fn compute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::process::ExitStatusExt;
 
     /// A `BenchmarkResult` with the given wall-clock samples (other fields unused
     /// by `compute`).
@@ -103,7 +98,6 @@ mod tests {
             measurements: wall_clocks
                 .iter()
                 .map(|&wall_clock| Execution {
-                    status: ExitStatus::from_raw(0),
                     wall_clock,
                     time_user: 0.0,
                     time_system: 0.0,

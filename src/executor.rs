@@ -6,13 +6,29 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::time::Instant;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 use crate::measurement::Execution;
 use crate::options::{Invocation, Options};
 
 /// Largest amount of a failing command's stderr to keep for the error message.
 const STDERR_CAP: usize = 8 * 1024;
+
+/// A benchmarked or hook command exited non-zero. Carries the child's exit
+/// code so megafine can terminate with the same one.
+#[derive(Debug)]
+pub struct CommandFailed {
+    pub code: i32,
+    message: String,
+}
+
+impl std::fmt::Display for CommandFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CommandFailed {}
 
 impl Options {
     /// Execute the pre-parsed command and measure its resource usage. stdout is
@@ -71,23 +87,23 @@ impl Options {
         let captured = child.stderr.take().map(drain_capped).unwrap_or_default();
         // Region events buffered while stderr drained; collect them now.
         let region_window = region_pipe.map(|(read_fd, _)| read_region_window(read_fd));
-        let mut exec = wait4(&child)
+        let (status, mut exec) = wait4(&child)
             .with_context(|| format!("failed to wait for command '{command_line}'"))?;
         exec.wall_clock = start.elapsed().as_secs_f64();
 
-        if !exec.status.success() {
+        if !status.success() {
             let stderr = String::from_utf8_lossy(&captured);
             let stderr = stderr.trim_end();
-            if stderr.is_empty() {
-                bail!(
-                    "command '{command_line}' terminated with a non-zero exit code ({})",
-                    exec.status
-                );
+            let mut message =
+                format!("command '{command_line}' terminated with a non-zero exit code ({status})");
+            if !stderr.is_empty() {
+                message.push_str(&format!("\n--- stderr ---\n{stderr}"));
             }
-            bail!(
-                "command '{command_line}' terminated with a non-zero exit code ({})\n--- stderr ---\n{stderr}",
-                exec.status
-            );
+            // Shell convention for signal deaths: 128 + signal number.
+            let code = status
+                .code()
+                .unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+            return Err(CommandFailed { code, message }.into());
         }
 
         if let Some(window) = region_window {
@@ -209,7 +225,7 @@ fn timeval_to_second(tv: libc::timeval) -> f64 {
 /// Reap `child` via `wait4(2)` to obtain its exit status and rusage. The
 /// `time_wall_clock` is left at 0.0 for the caller to fill, since the timing
 /// window belongs to `execute`, not the reap.
-fn wait4(child: &Child) -> Result<Execution> {
+fn wait4(child: &Child) -> Result<(ExitStatus, Execution)> {
     let pid = child.id() as i32;
     let mut status = 0;
     let mut rusage = MaybeUninit::zeroed();
@@ -222,14 +238,16 @@ fn wait4(child: &Child) -> Result<Execution> {
     })?;
 
     let rusage = unsafe { rusage.assume_init() };
-    Ok(Execution {
-        status: ExitStatus::from_raw(status),
-        wall_clock: 0.0,
-        time_user: timeval_to_second(rusage.ru_utime),
-        time_system: timeval_to_second(rusage.ru_stime),
-        // ru_maxrss is reported in KiB on Linux.
-        max_rss: (rusage.ru_maxrss.max(0) as u64) * 1024,
-    })
+    Ok((
+        ExitStatus::from_raw(status),
+        Execution {
+            wall_clock: 0.0,
+            time_user: timeval_to_second(rusage.ru_utime),
+            time_system: timeval_to_second(rusage.ru_stime),
+            // ru_maxrss is reported in KiB on Linux.
+            max_rss: (rusage.ru_maxrss.max(0) as u64) * 1024,
+        },
+    ))
 }
 
 #[cfg(test)]

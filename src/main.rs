@@ -64,7 +64,15 @@ fn main() -> Result<()> {
     }
 
     match error {
-        Some(e) => Err(e),
+        Some(e) => {
+            // A failed command's exit code becomes megafine's exit code, so
+            // wrapping scripts see the same failure as running it directly.
+            if let Some(f) = e.downcast_ref::<executor::CommandFailed>() {
+                eprintln!("Error: {e:?}");
+                std::process::exit(f.code);
+            }
+            Err(e)
+        }
         None => Ok(()),
     }
 }

@@ -351,6 +351,12 @@ fn failing_command_errors() {
 }
 
 #[test]
+fn failing_command_exit_code_is_mirrored() {
+    let out = run(&["-r", "1", "--no-calibrate", "--no-pin", "sh -c 'exit 7'"]);
+    assert_eq!(out.status.code(), Some(7));
+}
+
+#[test]
 fn failing_run_dumps_partial_results() {
     // Succeeds for run ids 0 and 1, fails on 2; -j 1 makes the abort point
     // deterministic, so exactly 2 measurements are collected before the error.
