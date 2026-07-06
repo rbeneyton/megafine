@@ -14,6 +14,7 @@ use crate::format::{
 };
 use crate::measurement::{BenchmarkResult, Execution};
 use crate::options::{Invocation, Options};
+use crate::stats::Estimator;
 
 /// Minimum delay between live counter updates sent to the display.
 const COUNTER_REFRESH: Duration = Duration::from_millis(100);
@@ -119,9 +120,8 @@ struct CmdState {
     timed_remaining: Option<u64>,
     in_flight: u64,
     measurements: Vec<Execution>,
-    /// Wall-clock times of `measurements`, kept sorted by inserting each new
-    /// value in place (percentile estimators read it directly).
-    sorted: Vec<f64>,
+    /// Running sum of the `measurements` wall-clock times, for an O(1) mean.
+    sum: f64,
     max_rss: u64,
     last_update: Instant,
     completed: bool,
@@ -179,33 +179,65 @@ fn done_dispatching(s: &CmdState, interrupted: bool) -> bool {
         || (s.warmup_remaining == 0 && s.warmup_in_flight == 0 && s.timed_remaining == Some(0))
 }
 
+/// Compare a command's aggregates against the calibrated measurement floor,
+/// once at least two timed runs are in. `Some` is the error aborting the run.
+fn check_floor(s: &CmdState, base: &Baseline, precision: usize) -> Option<anyhow::Error> {
+    let count = s.measurements.len();
+    if count < 2 {
+        return None;
+    }
+    let mean = s.sum / count as f64;
+    if mean < base.time {
+        return Some(anyhow!(
+            "'{}' mean {} is below the /bin/true floor {} : measurement too low to be precise (dominated by spawn/measurement overhead). You can remove this check by using --no-calibrate cli options.",
+            s.spec.label,
+            format_time(mean, auto_unit(mean), precision),
+            format_time(base.time, auto_unit(base.time), precision),
+        ));
+    }
+    if s.max_rss < base.rss {
+        return Some(anyhow!(
+            "'{}' peak RSS {} is below the /bin/true floor {} : measurement dominated by megafine's own resident set. You can remove this check by using --no-calibrate cli options.",
+            s.spec.label,
+            format_bytes(s.max_rss),
+            format_bytes(base.rss),
+        ));
+    }
+    None
+}
+
 /// Render every command's live counter as one aligned block and send it to the
 /// display, so all rows share a unit and line up (see `render_counters`).
 fn publish_counters(
     states: &[CmdState],
     progress: Option<&Progress>,
     options: &Options,
+    counters: &mut Vec<f64>,
     display_tx: &Sender<DisplayMessage>,
 ) {
-    // (count, center, std) of every command's timed runs so far.
-    let summaries: Vec<(u64, f64, Option<f64>)> = states
-        .iter()
-        .map(|s| {
-            let (_, std) = crate::stats::mean_stddev(&s.sorted);
-            (
-                s.measurements.len() as u64,
-                options.estimator.value(&s.sorted),
-                std,
-            )
-        })
-        .collect();
-    let (_, ref_center, ref_std) = summaries[options.reference];
+    // (count, center, std) of one command's timed runs so far. `counters` is a
+    // reused buffer for the wall-clock times, sorted only when the estimator
+    // needs order.
+    let summary = |counters: &mut Vec<f64>, s: &CmdState| {
+        counters.clear();
+        counters.extend(s.measurements.iter().map(|x| x.wall_clock));
+        if matches!(options.estimator, Estimator::Percentile(_)) {
+            counters.sort_unstable_by(f64::total_cmp);
+        }
+        let (_, std) = crate::stats::mean_stddev(counters);
+        (
+            s.measurements.len() as u64,
+            options.estimator.value(counters),
+            std,
+        )
+    };
+    let (_, ref_center, ref_std) = summary(counters, &states[options.reference]);
 
     let rows: Vec<CounterRow> = states
         .iter()
-        .zip(&summaries)
         .enumerate()
-        .map(|(i, (s, &(count, center, std)))| {
+        .map(|(i, s)| {
+            let (count, center, std) = summary(counters, s);
             // Live counterpart of the final ranking, against the reference's
             // current center; absent until both sides have a measurement.
             let relative = if states.len() < 2 {
@@ -387,7 +419,7 @@ pub fn run_benchmarks(
                     timed_remaining,
                     in_flight: 0,
                     measurements: Vec::new(),
-                    sorted: Vec::new(),
+                    sum: 0.0,
                     max_rss: 0,
                     last_update: Instant::now() - COUNTER_REFRESH,
                     completed: false,
@@ -453,6 +485,8 @@ pub fn run_benchmarks(
             let mut in_flight_total = 0usize;
             let mut rr = 0usize;
             let mut next_run_id = 0u64;
+            // Reused by publish_counters for each row's wall-clock times.
+            let mut counters: Vec<f64> = Vec::new();
             let mut progress = timed_remaining.map(|runs| Progress {
                 total: states.len() as u64 * (options.warmup + runs),
                 done: 0,
@@ -494,36 +528,14 @@ pub fn run_benchmarks(
                             abort_error = Some(e);
                         }
                         Ok(r) if !report.warmup && !intr && !aborted => {
-                            let at = s.sorted.partition_point(|&t| t < r.wall_clock);
-                            s.sorted.insert(at, r.wall_clock);
+                            s.sum += r.wall_clock;
                             s.max_rss = s.max_rss.max(r.max_rss);
                             s.measurements.push(r);
-                            if let Some(base) = &baseline {
-                                let count = s.measurements.len();
-                                if count >= 2 {
-                                    let mean = crate::stats::mean(&s.sorted);
-                                    if mean < base.time {
-                                        aborted = true;
-                                        abort_error = Some(anyhow!(
-                                            "'{}' mean {} is below the /bin/true floor {} : measurement too low to be precise (dominated by spawn/measurement overhead). You can remove this check by using --no-calibrate cli options.",
-                                            s.spec.label,
-                                            format_time(mean, auto_unit(mean), options.precision),
-                                            format_time(
-                                                base.time,
-                                                auto_unit(base.time),
-                                                options.precision
-                                            ),
-                                        ));
-                                    } else if s.max_rss < base.rss {
-                                        aborted = true;
-                                        abort_error = Some(anyhow!(
-                                            "'{}' peak RSS {} is below the /bin/true floor {} : measurement dominated by megafine's own resident set. You can remove this check by using --no-calibrate cli options.",
-                                            s.spec.label,
-                                            format_bytes(s.max_rss),
-                                            format_bytes(base.rss),
-                                        ));
-                                    }
-                                }
+                            if let Some(base) = &baseline
+                                && let Some(e) = check_floor(s, base, options.precision)
+                            {
+                                aborted = true;
+                                abort_error = Some(e);
                             }
                             if s.last_update.elapsed() >= COUNTER_REFRESH {
                                 s.last_update = Instant::now();
@@ -534,7 +546,13 @@ pub fn run_benchmarks(
                     }
                 }
                 if publish {
-                    publish_counters(&states, progress.as_ref(), options, &display_tx);
+                    publish_counters(
+                        &states,
+                        progress.as_ref(),
+                        options,
+                        &mut counters,
+                        &display_tx,
+                    );
                 }
 
                 // Finalize a command once it stops producing work and drains.
@@ -544,7 +562,13 @@ pub fn run_benchmarks(
                     && states[i].in_flight == 0
                 {
                     states[i].completed = true;
-                    publish_counters(&states, progress.as_ref(), options, &display_tx);
+                    publish_counters(
+                        &states,
+                        progress.as_ref(),
+                        options,
+                        &mut counters,
+                        &display_tx,
+                    );
                     if let Some(cleanup) = &options.cleanup
                         && let Err(e) = options.execute(cleanup, false, None)
                     {
