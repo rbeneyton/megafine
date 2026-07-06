@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TimeUnit {
     Microsecond,
@@ -93,14 +95,15 @@ pub fn format_duration(seconds: f64) -> String {
 
 /// Truncate `s` to at most `max` display columns, keeping the start and the end
 /// with a '…' in the middle (commands often differ at both ends, not just the
-/// start). The front keeps the extra column when `max` is even.
-pub fn truncate(s: &str, max: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= max {
-        return s.to_string();
+/// start). The front keeps the extra column when `max` is even. Borrows `s`
+/// unchanged (no allocation) when it already fits.
+pub fn truncate(s: &str, max: usize) -> Cow<'_, str> {
+    if s.chars().count() <= max {
+        return Cow::Borrowed(s);
     }
+    let chars: Vec<char> = s.chars().collect();
     if max <= 1 {
-        return chars[..max].iter().collect();
+        return Cow::Owned(chars[..max].iter().collect());
     }
     let budget = max - 1; // one column for the '…'
     let front = budget.div_ceil(2);
@@ -108,7 +111,7 @@ pub fn truncate(s: &str, max: usize) -> String {
     let mut out: String = chars[..front].iter().collect();
     out.push('…');
     out.extend(&chars[chars.len() - back..]);
-    out
+    Cow::Owned(out)
 }
 
 /// A row's live relation to the reference command, mirroring the final ranking.
