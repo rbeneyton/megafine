@@ -26,6 +26,19 @@ enum WorkerState {
 
 const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏', ' '];
 const FRAME: Duration = Duration::from_millis(500);
+/// Minimum delay between two redraws: messages arriving faster than this are
+/// coalesced into one frame instead of each triggering a full redraw.
+const MIN_REDRAW: Duration = Duration::from_millis(50);
+
+/// Fold one message into the display state.
+fn apply(msg: DisplayMessage, worker_state: &mut [WorkerState], counter_msgs: &mut Vec<String>) {
+    match msg {
+        DisplayMessage::Start(w, idx) => worker_state[w] = WorkerState::Running(idx),
+        DisplayMessage::Calibrate(w) => worker_state[w] = WorkerState::Calibrating,
+        DisplayMessage::Idle(w) => worker_state[w] = WorkerState::Idle,
+        DisplayMessage::Counters(lines) => *counter_msgs = lines,
+    }
+}
 
 /// Query the terminal size via the controlling tty as `(rows, cols)`,
 /// defaulting to 24x80.
@@ -121,14 +134,30 @@ pub fn spawn_display(
             let _ = out.flush();
         };
 
+        let mut last_draw = Instant::now();
+        let mut dirty = false;
         draw(frame, &worker_state, &counter_msgs);
 
         loop {
-            match rx.recv_timeout(FRAME) {
-                Ok(DisplayMessage::Start(w, idx)) => worker_state[w] = WorkerState::Running(idx),
-                Ok(DisplayMessage::Calibrate(w)) => worker_state[w] = WorkerState::Calibrating,
-                Ok(DisplayMessage::Idle(w)) => worker_state[w] = WorkerState::Idle,
-                Ok(DisplayMessage::Counters(lines)) => counter_msgs = lines,
+            // While a state change waits behind the redraw floor, wake when
+            // the floor expires instead of a full frame later, so the last
+            // update of a burst is never shown late.
+            let timeout = if dirty {
+                MIN_REDRAW.saturating_sub(last_draw.elapsed())
+            } else {
+                FRAME
+            };
+            match rx.recv_timeout(timeout) {
+                Ok(msg) => {
+                    // Drain everything queued behind the first message: the
+                    // frame below reflects the latest state, without one
+                    // redraw (and tty write) per message.
+                    apply(msg, &mut worker_state, &mut counter_msgs);
+                    while let Ok(msg) = rx.try_recv() {
+                        apply(msg, &mut worker_state, &mut counter_msgs);
+                    }
+                    dirty = true;
+                }
                 Err(RecvTimeoutError::Disconnected) => {
                     // The cursor is parked at the block's top: erase the block
                     // and restore the cursor.
@@ -144,7 +173,11 @@ pub fn spawn_display(
                 frame = frame.wrapping_add(1);
                 last_anim = Instant::now();
             }
-            draw(frame, &worker_state, &counter_msgs);
+            if last_draw.elapsed() >= MIN_REDRAW {
+                last_draw = Instant::now();
+                dirty = false;
+                draw(frame, &worker_state, &counter_msgs);
+            }
         }
     })
 }

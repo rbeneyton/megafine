@@ -221,6 +221,7 @@ apply), or if `--no-calibrate` option is used.
   report, the relative speeds and the live display
 - [x] Live `ETA` line when `-r/--runs` is given (rate-based: elapsed wall time
   scaled by the warmup+timed runs still to go), refreshed with the counters
+- [x] Avoid flooding refresh operations
 
 ### [0.1.0] 2026-06-05
 
