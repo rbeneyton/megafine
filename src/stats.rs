@@ -88,6 +88,107 @@ pub fn mean_stddev(values: &[f64]) -> (f64, Option<f64>) {
     (m, Some(variance.sqrt()))
 }
 
+/// Welch's t statistic and Welch–Satterthwaite degrees of freedom for two
+/// samples summarized as (mean, stddev, count).
+pub fn welch_t(m1: f64, s1: f64, n1: usize, m2: f64, s2: f64, n2: usize) -> (f64, f64) {
+    let v1 = s1 * s1 / n1 as f64;
+    let v2 = s2 * s2 / n2 as f64;
+    let t = (m1 - m2) / (v1 + v2).sqrt();
+    let df = (v1 + v2).powi(2) / (v1 * v1 / (n1 - 1) as f64 + v2 * v2 / (n2 - 1) as f64);
+    (t, df)
+}
+
+/// Two-sided p-value of a t statistic with `df` degrees of freedom:
+/// `I_x(df/2, 1/2)` at `x = df/(df + t²)` (the Student-t survival identity).
+pub fn t_test_p(t: f64, df: f64) -> f64 {
+    betainc(df / 2.0, 0.5, df / (df + t * t))
+}
+
+/// ln Γ(x) via the 6-coefficient Lanczos approximation (Numerical Recipes
+/// `gammln`), accurate to ~1e-10 for x > 0.
+fn ln_gamma(x: f64) -> f64 {
+    const COF: [f64; 6] = [
+        76.18009172947146,
+        -86.50532032941677,
+        24.01409824083091,
+        -1.231739572450155,
+        0.1208650973866179e-2,
+        -0.5395239384953e-5,
+    ];
+    let tmp = x + 5.5;
+    let tmp = tmp - (x + 0.5) * tmp.ln();
+    let mut y = x;
+    let mut ser = 1.000000000190015;
+    for c in COF {
+        y += 1.0;
+        ser += c / y;
+    }
+    -tmp + (2.5066282746310005 * ser / x).ln()
+}
+
+/// Continued fraction of the incomplete beta (Numerical Recipes `betacf`,
+/// modified Lentz's method).
+fn betacf(a: f64, b: f64, x: f64) -> f64 {
+    const EPS: f64 = 3e-12;
+    const FPMIN: f64 = 1e-30;
+    let (qab, qap, qam) = (a + b, a + 1.0, a - 1.0);
+    let mut c = 1.0;
+    let mut d = 1.0 - qab * x / qap;
+    if d.abs() < FPMIN {
+        d = FPMIN;
+    }
+    d = 1.0 / d;
+    let mut h = d;
+    for m in 1..=200 {
+        let m = m as f64;
+        let m2 = 2.0 * m;
+        let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+        d = 1.0 + aa * d;
+        if d.abs() < FPMIN {
+            d = FPMIN;
+        }
+        c = 1.0 + aa / c;
+        if c.abs() < FPMIN {
+            c = FPMIN;
+        }
+        d = 1.0 / d;
+        h *= d * c;
+        let aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+        d = 1.0 + aa * d;
+        if d.abs() < FPMIN {
+            d = FPMIN;
+        }
+        c = 1.0 + aa / c;
+        if c.abs() < FPMIN {
+            c = FPMIN;
+        }
+        d = 1.0 / d;
+        let del = d * c;
+        h *= del;
+        if (del - 1.0).abs() < EPS {
+            break;
+        }
+    }
+    h
+}
+
+/// Regularized incomplete beta `I_x(a, b)` (Numerical Recipes `betai`).
+fn betainc(a: f64, b: f64, x: f64) -> f64 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if x >= 1.0 {
+        return 1.0;
+    }
+    let front =
+        (ln_gamma(a + b) - ln_gamma(a) - ln_gamma(b) + a * x.ln() + b * (1.0 - x).ln()).exp();
+    if x < (a + 1.0) / (a + b + 2.0) {
+        front * betacf(a, b, x) / a
+    } else {
+        1.0 - front * betacf(b, a, 1.0 - x) / b
+    }
+}
+
 /// Propagated uncertainty on the ratio `mean / ref_mean` of two measured means,
 /// assuming zero covariance (same formula as hyperfine, for f = A/B):
 /// https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Example_formulae
@@ -156,6 +257,24 @@ mod tests {
     fn ratio_stddev_propagation() {
         // f = A/B with A = 2 ± 0.2, B = 1 ± 0.1: σ_f = 2·√(0.01 + 0.01).
         assert!((ratio_stddev(2.0, 0.2, 1.0, 0.1) - 0.282_842_712).abs() < 1e-6);
+    }
+
+    #[test]
+    fn welch_known_values() {
+        // scipy.stats.ttest_ind_from_stats(10, 1, 10, 11, 1, 10, equal_var=False)
+        let (t, df) = welch_t(10.0, 1.0, 10, 11.0, 1.0, 10);
+        assert!((t + 2.236_068).abs() < 1e-5, "t = {t}");
+        assert!((df - 18.0).abs() < 1e-9, "df = {df}");
+    }
+
+    #[test]
+    fn t_test_p_known_values() {
+        assert!((t_test_p(0.0, 10.0) - 1.0).abs() < 1e-9);
+        // df=1 is the Cauchy distribution: P(|T| > 1) = 0.5 exactly.
+        assert!((t_test_p(1.0, 1.0) - 0.5).abs() < 1e-9);
+        // scipy: 2 * t.sf(2, 10) and 2 * t.sf(2.236068, 18).
+        assert!((t_test_p(2.0, 10.0) - 0.073_388).abs() < 1e-3);
+        assert!((t_test_p(2.236_068, 18.0) - 0.038_250).abs() < 1e-3);
     }
 
     #[test]

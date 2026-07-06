@@ -38,6 +38,12 @@ pub struct Cli {
     #[arg(short, long, value_name = "NUM", help_heading = "Execution")]
     pub runs: Option<u64>,
 
+    /// Run each command until the 95% confidence interval of its mean is
+    /// within ±PCT percent (10 runs minimum; --runs then acts as a cap).
+    /// Needs the mean estimator.
+    #[arg(long, value_name = "PCT", help_heading = "Execution")]
+    pub target: Option<f64>,
+
     /// Run commands through the current shell instead of direct execution.
     #[arg(short = 'S', long, help_heading = "Execution")]
     pub shell: bool,

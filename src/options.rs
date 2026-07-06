@@ -17,6 +17,9 @@ pub struct Options {
     pub jobs: usize,
     pub warmup: u64,
     pub runs: Option<u64>,
+    /// Stop a command once the 95% CI half-width of its mean is below this
+    /// percentage of the mean.
+    pub target: Option<f64>,
     /// `None` runs commands directly; `Some(path)` runs them through that shell.
     pub shell: Option<String>,
     pub setup: Option<Invocation>,
@@ -126,6 +129,15 @@ impl Options {
             bail!("--runs must be at least 1");
         }
 
+        if let Some(t) = cli.target {
+            if t <= 0.0 {
+                bail!("--target must be positive");
+            }
+            if estimator != Estimator::Mean {
+                bail!("--target needs the mean estimator (percentile CIs are not supported)");
+            }
+        }
+
         if cli.raw && cli.commands.len() < 2 {
             bail!("--raw needs at least 2 commands (it prints relative-speed ratios)");
         }
@@ -151,6 +163,7 @@ impl Options {
             jobs,
             warmup: cli.warmup,
             runs: cli.runs,
+            target: cli.target,
             shell,
             setup: None,
             prepare: None,
@@ -247,6 +260,13 @@ mod tests {
         let e = opts(&["--estimator", "p999", "a"]).unwrap().estimator;
         assert!(e == Estimator::Percentile(99.9));
         assert!(opts(&["--estimator", "avg", "a"]).is_err());
+    }
+
+    #[test]
+    fn target_validation() {
+        assert!(opts(&["--target", "0", "a"]).is_err());
+        assert!(opts(&["--target", "1", "--estimator", "p90", "a"]).is_err());
+        assert_eq!(opts(&["--target", "1", "a"]).unwrap().target, Some(1.0));
     }
 
     #[test]

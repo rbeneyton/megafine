@@ -125,6 +125,41 @@ fn command_name_is_shown() {
 }
 
 #[test]
+fn target_stops_on_its_own() {
+    // ±50% is reached as soon as the 10-run floor is; -j 1 makes the stop
+    // deterministic, so exactly 10 measurements are collected.
+    let out = run(&[
+        "-j",
+        "1",
+        "--target",
+        "50",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.01",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(stdout(&out).contains("10 runs"), "stdout: {}", stdout(&out));
+}
+
+#[test]
+fn clear_difference_has_no_significance_note() {
+    let out = run(&[
+        "-r",
+        "5",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.01",
+        "sleep 0.05",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        !stdout(&out).contains("not significantly"),
+        "stdout: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
 fn parameter_list_expands_commands() {
     let out = run(&[
         "-L",

@@ -116,12 +116,15 @@ struct CmdState {
     spec: Arc<CmdSpec>,
     warmup_remaining: u64,
     warmup_in_flight: u64,
-    /// Timed runs still to dispatch; `None` means infinite (until Ctrl-C).
+    /// Timed runs still to dispatch; `None` means infinite (until Ctrl-C or
+    /// --target precision).
     timed_remaining: Option<u64>,
     in_flight: u64,
     measurements: Vec<Execution>,
-    /// Running sum of the `measurements` wall-clock times, for an O(1) mean.
+    /// Running sum and sum of squares of the `measurements` wall-clock times,
+    /// for an O(1) mean and stddev.
     sum: f64,
+    sum_sq: f64,
     max_rss: u64,
     last_update: Instant,
     completed: bool,
@@ -177,6 +180,21 @@ fn pick(states: &[CmdState], rr: usize) -> Option<(usize, bool)> {
 fn done_dispatching(s: &CmdState, interrupted: bool) -> bool {
     interrupted
         || (s.warmup_remaining == 0 && s.warmup_in_flight == 0 && s.timed_remaining == Some(0))
+}
+
+/// Minimum timed runs before --target may stop a command.
+const TARGET_MIN_RUNS: usize = 10;
+
+/// Whether the 95% CI half-width of the mean is within ±`target` percent of
+/// it, i.e. the command has been measured precisely enough to stop (--target).
+fn target_reached(s: &CmdState, target: f64) -> bool {
+    let n = s.measurements.len();
+    if n < TARGET_MIN_RUNS {
+        return false;
+    }
+    let mean = s.sum / n as f64;
+    let variance = (s.sum_sq - s.sum * s.sum / n as f64) / (n - 1) as f64;
+    1.96 * variance.max(0.0).sqrt() / (n as f64).sqrt() < target / 100.0 * mean
 }
 
 /// Compare a command's aggregates against the calibrated measurement floor,
@@ -420,6 +438,7 @@ pub fn run_benchmarks(
                     in_flight: 0,
                     measurements: Vec::new(),
                     sum: 0.0,
+                    sum_sq: 0.0,
                     max_rss: 0,
                     last_update: Instant::now() - COUNTER_REFRESH,
                     completed: false,
@@ -529,6 +548,7 @@ pub fn run_benchmarks(
                         }
                         Ok(r) if !report.warmup && !intr && !aborted => {
                             s.sum += r.wall_clock;
+                            s.sum_sq += r.wall_clock * r.wall_clock;
                             s.max_rss = s.max_rss.max(r.max_rss);
                             s.measurements.push(r);
                             if let Some(base) = &baseline
@@ -536,6 +556,14 @@ pub fn run_benchmarks(
                             {
                                 aborted = true;
                                 abort_error = Some(e);
+                            }
+                            if let Some(target) = options.target
+                                && s.timed_remaining != Some(0)
+                                && target_reached(s, target)
+                            {
+                                // Stop dispatching; the drain/completed
+                                // machinery finishes the command as usual.
+                                s.timed_remaining = Some(0);
                             }
                             if s.last_update.elapsed() >= COUNTER_REFRESH {
                                 s.last_update = Instant::now();

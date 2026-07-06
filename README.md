@@ -186,7 +186,6 @@ apply), or if `--no-calibrate` option is used.
 - [ ] multiple slots support in region mode, to allow multiple comparison
   inside same process or subtle timings 
 - [ ] pretty progress bars when -r is specified (low priority)
-- [ ] allow to define a target stddev (ie. run until you've reached ±1%)
 - [ ] allow to force a pattern-defined scheduling (strict round robin per worker, …)
 
 ## Changelog
@@ -224,6 +223,7 @@ apply), or if `--no-calibrate` option is used.
 - [x] Decode commands once at startup
 - [x] Return task stderr on error
 - [x] support parameters
+- [x] allow to define a target stddev (ie. run until you've reached ±1%)
 
 ### [0.1.0] 2026-06-05
 

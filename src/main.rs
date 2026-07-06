@@ -20,7 +20,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::Cli;
 use crate::format::{auto_unit, format_bytes, format_time, relative_cell, truncate};
-use crate::measurement::{BenchmarkResult, compute};
+use crate::measurement::{BenchmarkResult, NormBenchmark, compute};
 use crate::options::Options;
 
 fn main() -> Result<()> {
@@ -286,5 +286,30 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
     for ((left, width), r) in rows.iter().zip(&rank) {
         let pad = " ".repeat(col - width);
         println!("{left}{pad}  {}", r.to_string().bold());
+    }
+
+    // Welch's t-test against the reference: flag the rows whose difference
+    // could plausibly be measurement noise (silence = significant at 5%).
+    let summary = |item: &NormBenchmark| {
+        let times = item.result.times(|e| e.wall_clock);
+        let (m, s) = stats::mean_stddev(&times);
+        (m, s, times.len())
+    };
+    let reference = relative.iter().find(|i| i.is_reference).unwrap();
+    let (ref_m, ref_s, ref_n) = summary(reference);
+    for item in relative.iter().filter(|i| !i.is_reference) {
+        let (m, s, n) = summary(item);
+        let (Some(s), Some(ref_s)) = (s, ref_s) else {
+            continue;
+        };
+        let (t, df) = stats::welch_t(m, s, n, ref_m, ref_s, ref_n);
+        let p = stats::t_test_p(t, df);
+        if p >= 0.05 {
+            println!(
+                "{}: '{}' is not significantly different from the reference (p = {p:.2})",
+                "Note".yellow(),
+                item.result.label,
+            );
+        }
     }
 }
