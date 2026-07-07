@@ -97,6 +97,15 @@ pub struct Cli {
     #[arg(short = 'R', long, help_heading = "Measurement")]
     pub region: bool,
 
+    /// The measured quantity all statistics (estimator, ranking, --target,
+    /// significance verdict) are computed on: time (wall clock, or the region
+    /// window with --region), user, sys, rss, major-faults, minor-faults,
+    /// vol-ctx, invol-ctx, instructions, cycles, cache-misses or
+    /// branch-misses (counter metrics imply --counters; all but time stay
+    /// whole-process under --region) [default: time].
+    #[arg(short = 'm', long, value_name = "METRIC", help_heading = "Measurement")]
+    pub metric: Option<String>,
+
     /// Also collect hardware counters per run via perf events (user space, whole child tree):
     /// instructions retired, CPU cycles, IPC, cache misses and branch misses.
     #[arg(long, help_heading = "Measurement")]
@@ -158,8 +167,8 @@ pub struct Cli {
     )]
     pub precision: usize,
 
-    /// Central-value statistic for times and relative speeds: mean, median,
-    /// or a percentile (p90, p999 = 99.9th) [default: mean].
+    /// Central-value statistic for the metric and relative ratios: mean,
+    /// median, or a percentile (p90, p999 = 99.9th) [default: mean].
     #[arg(long, value_name = "ESTIMATOR", help_heading = "Output")]
     pub estimator: Option<String>,
 

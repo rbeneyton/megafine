@@ -674,6 +674,98 @@ fn sort_bogus_errors() {
 }
 
 #[test]
+fn metric_rss_ranks_and_shows_metric_line() {
+    let out = run(&[
+        "--metric",
+        "rss",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+        "sleep 0.02",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("Metric (rss"), "stdout: {s}");
+    assert!(s.contains("(best)") || s.contains("(worst)"), "stdout: {s}");
+}
+
+#[test]
+fn metric_user_smoke() {
+    let out = run(&[
+        "--metric",
+        "user",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        stdout(&out).contains("Metric (user"),
+        "stdout: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn metric_instructions_needs_perf() {
+    let out = run(&[
+        "--metric",
+        "instructions",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "/bin/true",
+        "/bin/true",
+    ]);
+    if !out.status.success() {
+        // Same graceful skip as the --counters test on perf-denied hosts.
+        assert!(stderr(&out).contains("perf"), "stderr: {}", stderr(&out));
+        return;
+    }
+    assert!(
+        stdout(&out).contains("Metric (instructions"),
+        "stdout: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn raw_metric_prints_one_ratio_per_command() {
+    let out = run(&[
+        "--raw",
+        "--metric",
+        "rss",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+        "sleep 0.02",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    let lines: Vec<&str> = s.lines().collect();
+    assert_eq!(lines.len(), 2, "stdout: {lines:?}");
+    assert_eq!(lines[0], "1.000000");
+}
+
+#[test]
+fn metric_bogus_errors() {
+    let out = run(&["--metric", "bogus", "-r", "1", "a"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("invalid metric"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn failing_command_errors() {
     let out = run(&["-r", "1", "--no-calibrate", "--no-pin", "false"]);
     assert!(!out.status.success());

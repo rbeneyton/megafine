@@ -122,10 +122,13 @@ struct CmdState {
     timed_remaining: Option<u64>,
     in_flight: u64,
     measurements: Vec<Execution>,
-    /// Running sum and sum of squares of the `measurements` wall-clock times,
-    /// for an O(1) mean and stddev.
+    /// Running sum and sum of squares of the selected metric's values across
+    /// `measurements`, for an O(1) mean and stddev (drives --target).
     sum: f64,
     sum_sq: f64,
+    /// Running sum of the wall-clock times, so the calibration floor stays a
+    /// time check whatever the selected metric.
+    time_sum: f64,
     max_rss: u64,
     last_update: Instant,
     completed: bool,
@@ -206,7 +209,7 @@ fn check_floor(s: &CmdState, base: &Baseline, precision: usize) -> Option<anyhow
     if count < 2 {
         return None;
     }
-    let mean = s.sum / count as f64;
+    let mean = s.time_sum / count as f64;
     if mean < base.time {
         return Some(anyhow!(
             "'{}' mean {} is below the /bin/true floor {} : measurement too low to be precise (dominated by spawn/measurement overhead). You can remove this check by using --no-calibrate cli options.",
@@ -240,7 +243,7 @@ fn publish_counters(
     // needs order.
     let summary = |counters: &mut Vec<f64>, s: &CmdState| {
         counters.clear();
-        counters.extend(s.measurements.iter().map(|x| x.wall_clock));
+        counters.extend(s.measurements.iter().map(|x| options.metric.value(x)));
         if matches!(options.estimator, Estimator::Percentile(_)) {
             counters.sort_unstable_by(f64::total_cmp);
         }
@@ -311,7 +314,13 @@ fn publish_counters(
     // The display draws each counter as "   {msg}" then trims to one less than
     // the width, so reserve the 3-space indent and that final column.
     let budget = term_width().saturating_sub(4);
-    let mut lines = render_counters(&rows, options.time_unit, options.precision, budget);
+    let mut lines = render_counters(
+        &rows,
+        options.metric.kind(),
+        options.time_unit,
+        options.precision,
+        budget,
+    );
     // Rate-based ETA: elapsed wall time scaled by the tasks still to run. The
     // task rate absorbs hooks, warmups and parallelism, which the per-run
     // measurements don't see.
@@ -466,6 +475,7 @@ pub fn run_benchmarks(
                     measurements: Vec::new(),
                     sum: 0.0,
                     sum_sq: 0.0,
+                    time_sum: 0.0,
                     max_rss: 0,
                     last_update: Instant::now() - COUNTER_REFRESH,
                     completed: false,
@@ -574,8 +584,10 @@ pub fn run_benchmarks(
                             abort_error = Some(e);
                         }
                         Ok(r) if !report.warmup && !intr && !aborted => {
-                            s.sum += r.wall_clock;
-                            s.sum_sq += r.wall_clock * r.wall_clock;
+                            let v = options.metric.value(&r);
+                            s.sum += v;
+                            s.sum_sq += v * v;
+                            s.time_sum += r.wall_clock;
                             s.max_rss = s.max_rss.max(r.max_rss);
                             s.measurements.push(r);
                             if let Some(base) = &baseline

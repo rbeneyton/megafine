@@ -41,6 +41,8 @@ printf 'sleep %s\n' (seq 1 8) | megafine -j 2 -
 
 - -j support, with dedicated cpu affinity for workers
 - region timing via `megafine_start()`/`megafine_stop()` instrumentation
+- `--metric` to rank on any collected quantity (time, rss, perf counters, …),
+  not just wall clock
 - no Windows/MacOS support
 - no export in many formats (markdown, json, …)
 - no shell specification, either current one or direct execution
@@ -243,6 +245,7 @@ apply), or if `--no-calibrate` option is used.
   null|inherit|FILE, --input FILE; `--output inherit` supersedes a dedicated
   --show-output)
 - [x] `--sort command|metric` to order the ranking table
+- [x] `--metric time|user|sys|rss|…|instructions|cycles|cache-misses|branch-misses`
 
 ### [0.1.0] 2026-06-05
 

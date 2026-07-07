@@ -20,8 +20,10 @@ use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::Cli;
-use crate::format::{auto_unit, format_bytes, format_count, format_time, relative_cell, truncate};
-use crate::measurement::{BenchmarkResult, NormBenchmark, compute};
+use crate::format::{
+    auto_unit, format_bytes, format_count, format_metric, format_time, relative_cell, truncate,
+};
+use crate::measurement::{BenchmarkResult, Metric, NormBenchmark, compute};
 use crate::options::{Options, Sort};
 
 fn main() -> Result<()> {
@@ -96,8 +98,13 @@ fn print_raw(results: &[BenchmarkResult], options: &Options) -> Result<()> {
     if results.len() < 2 {
         bail!("--raw needs measurements for at least 2 commands (run interrupted too early?)");
     }
-    let relative = compute(results, options.reference, options.estimator)
-        .context("could not compute relative speed (a benchmark time is zero)")?;
+    let relative = compute(
+        results,
+        options.reference,
+        options.estimator,
+        options.metric,
+    )
+    .context("could not compute the relative ratio (a benchmark metric is zero)")?;
     for item in &relative {
         println!("{:.6}", item.ratio);
     }
@@ -199,6 +206,33 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
             format_count(center_of(result.times(|e| e.invol_ctx_switches as f64))).blue(),
         );
 
+        // The Time block above always shows wall clock; when a different metric
+        // drives the ranking, surface its central value and spread as well.
+        if options.metric != Metric::Time {
+            let series = result.times(|e| options.metric.value(e));
+            let mut sorted = series.clone();
+            sorted.sort_unstable_by(f64::total_cmp);
+            let m_center = options.estimator.value(&sorted);
+            let (_, m_std) = stats::mean_stddev(&series);
+            let kind = options.metric.kind();
+            let center = format_metric(m_center, kind, options.time_unit, precision);
+            let spread = match m_std {
+                Some(std) => format!(
+                    " ± {}",
+                    format_metric(std, kind, options.time_unit, precision)
+                ),
+                None => String::new(),
+            };
+            println!(
+                "  Metric ({}, {} ± {}):  {}{}",
+                options.metric.name().green().bold(),
+                options.estimator.to_string().green().bold(),
+                "σ".green(),
+                center.green().bold(),
+                spread.green(),
+            );
+        }
+
         let failed = result.measurements.iter().filter(|e| e.failed).count();
         if failed > 0 {
             println!(
@@ -241,15 +275,21 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
         return;
     }
 
-    let Some(relative) = compute(results, options.reference, options.estimator) else {
+    let Some(relative) = compute(
+        results,
+        options.reference,
+        options.estimator,
+        options.metric,
+    ) else {
         eprintln!(
-            "{}: could not compute relative speed (a benchmark time is zero)",
+            "{}: could not compute the relative ratio (a benchmark metric is zero)",
             "Note".red()
         );
         return;
     };
 
-    // Rank by central time (1 = fastest) while keeping the rows in command order.
+    // Rank by the metric's central value (1 = best) while keeping the rows in
+    // command order.
     let mut order: Vec<usize> = (0..relative.len()).collect();
     order.sort_by(|&a, &b| relative[a].center.total_cmp(&relative[b].center));
     let mut rank = vec![0usize; relative.len()];
@@ -258,6 +298,12 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
     }
     let fastest = order[0];
     let slowest = order[order.len() - 1];
+    // Time reads "fastest/slowest"; any other metric is just "best/worst".
+    let (best_tag, worst_tag) = if options.metric == Metric::Time {
+        ("(fastest)", "(slowest)")
+    } else {
+        ("(best)", "(worst)")
+    };
 
     let cols = out_cols();
     // The rank column is as wide as the largest rank number or the "Rank" header.
@@ -288,8 +334,10 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
                 // uncertainty (both in percentage points).
                 format!(": {}", relative_cell(item.ratio, item.stddev, pct_w, unc_w))
             };
-            let tag_w = if i == fastest || i == slowest {
-                " (fastest)".chars().count()
+            let tag_w = if i == fastest {
+                1 + best_tag.chars().count()
+            } else if i == slowest {
+                1 + worst_tag.chars().count()
             } else {
                 0
             };
@@ -322,12 +370,12 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
             let mut left = format!("  {label:<label_w$}{suffix}");
             let mut width = left.chars().count();
             if i == fastest {
-                left.push_str(&format!(" {}", "(fastest)".green().bold()));
-                width += " (fastest)".chars().count();
+                left.push_str(&format!(" {}", best_tag.green().bold()));
+                width += 1 + best_tag.chars().count();
             }
             if i == slowest {
-                left.push_str(&format!(" {}", "(slowest)".red().bold()));
-                width += " (slowest)".chars().count();
+                left.push_str(&format!(" {}", worst_tag.red().bold()));
+                width += 1 + worst_tag.chars().count();
             }
             (left, width)
         })
@@ -350,9 +398,9 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
     // Welch's t-test against the reference: flag the rows whose difference
     // could plausibly be measurement noise (silence = significant at 5%).
     let summary = |item: &NormBenchmark| {
-        let times = item.result.times(|e| e.wall_clock);
-        let (m, s) = stats::mean_stddev(&times);
-        (m, s, times.len())
+        let values = item.result.times(|e| options.metric.value(e));
+        let (m, s) = stats::mean_stddev(&values);
+        (m, s, values.len())
     };
     let reference = relative.iter().find(|i| i.is_reference).unwrap();
     let (ref_m, ref_s, ref_n) = summary(reference);

@@ -34,6 +34,24 @@ impl TimeUnit {
     }
 }
 
+/// How a metric's values are formatted: durations, byte sizes or plain counts.
+#[derive(Clone, Copy, PartialEq)]
+pub enum MetricKind {
+    Time,
+    Bytes,
+    Count,
+}
+
+/// Format one value of a metric. `unit` (when set) forces the time unit and is
+/// ignored by the other kinds.
+pub fn format_metric(v: f64, kind: MetricKind, unit: Option<TimeUnit>, precision: usize) -> String {
+    match kind {
+        MetricKind::Time => format_time(v, unit.unwrap_or_else(|| auto_unit(v)), precision),
+        MetricKind::Bytes => format_bytes(v as u64),
+        MetricKind::Count => format_count(v),
+    }
+}
+
 /// Pick a human-friendly unit for a duration given in seconds.
 pub fn auto_unit(seconds: f64) -> TimeUnit {
     if seconds < 1e-3 {
@@ -181,11 +199,13 @@ pub struct CounterRow<'a> {
     pub relative: Option<Relative>,
 }
 
-/// Render all live counter lines as a column-aligned block. Every column shares
-/// one unit — `forced_unit` (if set) or the lowest unit across the rows for time,
-/// and the lowest unit across the rows for peak RSS.
+/// Render all live counter lines as a column-aligned block. The center/σ
+/// columns show the selected metric (`kind`): time shares one unit —
+/// `forced_unit` (if set) or the lowest unit across the rows — and the peak
+/// RSS column shares the lowest unit across the rows.
 pub fn render_counters(
     rows: &[CounterRow],
+    kind: MetricKind,
     forced_unit: Option<TimeUnit>,
     precision: usize,
     budget: usize,
@@ -201,9 +221,33 @@ pub fn render_counters(
             .collect();
     }
 
-    let time_unit =
-        forced_unit.unwrap_or_else(|| present.iter().map(|r| auto_unit(r.center)).min().unwrap());
-    let suffix = time_unit.suffix();
+    // Center/σ cells are pre-rendered: their unit depends on the metric kind,
+    // and right-aligning the finished cells keeps the columns lined up (time
+    // rows share one unit, so their decimal points align too).
+    let metric_cell: Box<dyn Fn(f64) -> String> = match kind {
+        MetricKind::Time => {
+            let unit = forced_unit
+                .unwrap_or_else(|| present.iter().map(|r| auto_unit(r.center)).min().unwrap());
+            Box::new(move |v| format_time(v, unit, precision))
+        }
+        MetricKind::Bytes => Box::new(|v| format_bytes(v as u64)),
+        MetricKind::Count => Box::new(format_count),
+    };
+    let center_cells: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            if r.count == 0 {
+                String::new()
+            } else {
+                metric_cell(r.center)
+            }
+        })
+        .collect();
+    let std_cells: Vec<Option<String>> = rows
+        .iter()
+        .map(|r| (r.count > 0).then(|| r.std.map(&metric_cell)).flatten())
+        .collect();
+
     let rss_unit = present
         .iter()
         .filter(|r| r.peak_rss > 0)
@@ -220,15 +264,12 @@ pub fn render_counters(
         .map(|r| r.count.to_string().len())
         .max()
         .unwrap();
-    let center_w = present
+    let center_w = center_cells
         .iter()
-        .map(|r| time_value(r.center, time_unit, precision).len())
+        .map(|c| c.chars().count())
         .max()
         .unwrap();
-    let std_w = present
-        .iter()
-        .filter_map(|r| r.std.map(|s| time_value(s, time_unit, precision).len()))
-        .max();
+    let std_w = std_cells.iter().flatten().map(|c| c.chars().count()).max();
     let rss_w = rss_unit.map(|u| {
         present
             .iter()
@@ -281,11 +322,10 @@ pub fn render_counters(
         })
         .collect();
 
-    // Cap the label column so the duration columns that follow it stay visible
+    // Cap the label column so the metric columns that follow it stay visible
     // within `budget`. The tail width is fixed once the columns above are known.
-    let suffix_w = suffix.chars().count();
-    let fixed_tail = 2 + count_w + 1 + 4 + 2 + center_w + 1 + suffix_w;
-    let std_tail = std_w.map_or(0, |sw| 3 + sw + 1 + suffix_w);
+    let fixed_tail = 2 + count_w + 1 + 4 + 2 + center_w;
+    let std_tail = std_w.map_or(0, |sw| 3 + sw);
     let peak_tail = match (rss_unit, rss_w) {
         (Some(u), Some(rw)) => 7 + rw + 1 + BYTE_UNITS[u].chars().count(),
         _ => 0,
@@ -308,26 +348,23 @@ pub fn render_counters(
 
     rows.iter()
         .zip(&rel_cells)
-        .map(|(x, rel)| {
+        .zip(center_cells.iter().zip(&std_cells))
+        .map(|((x, rel), (center, std_cell))| {
             let label = truncate(x.label, label_w);
             if x.count == 0 {
                 return format!("{label:<label_w$}  pending");
             }
             let runs = if x.count == 1 { "run" } else { "runs" };
             let mut line = format!(
-                "{label:<label_w$}  {:>count_w$} {runs:<4}  {:>center_w$} {suffix}",
+                "{label:<label_w$}  {:>count_w$} {runs:<4}  {center:>center_w$}",
                 x.count,
-                time_value(x.center, time_unit, precision),
             );
             // Reserve the `± σ` segment on every row so the peak column aligns
             // even while a freshly-started command still has a single run.
             if let Some(sw) = std_w {
-                match x.std {
-                    Some(std) => line.push_str(&format!(
-                        " ± {:>sw$} {suffix}",
-                        time_value(std, time_unit, precision)
-                    )),
-                    None => line.push_str(&" ".repeat(3 + sw + 1 + suffix.chars().count())),
+                match std_cell {
+                    Some(sc) => line.push_str(&format!(" ± {sc:>sw$}")),
+                    None => line.push_str(&" ".repeat(3 + sw)),
                 }
             }
             if let (Some(u), Some(rw)) = (rss_unit, rss_w)
@@ -467,7 +504,7 @@ mod tests {
                 }),
             ),
         ];
-        let lines = render_counters(&rows, None, 3, 200);
+        let lines = render_counters(&rows, MetricKind::Time, None, 3, 200);
         assert!(lines[0].ends_with("  reference"), "{}", lines[0]);
         assert!(lines[1].ends_with("  +10.44% (± 5.87)"), "{}", lines[1]);
     }
@@ -497,7 +534,7 @@ mod tests {
                 }),
             ),
         ];
-        let lines = render_counters(&rows, None, 3, 200);
+        let lines = render_counters(&rows, MetricKind::Time, None, 3, 200);
         assert!(lines[1].ends_with("    +9.50%"), "{}", lines[1]);
         assert!(lines[2].ends_with("  +123.40% (± 12.30)"), "{}", lines[2]);
     }
@@ -505,7 +542,39 @@ mod tests {
     #[test]
     fn counters_without_relative_have_no_column() {
         let rows = [counter_row(2, 0.5, Some(0.1), None)];
-        let lines = render_counters(&rows, None, 3, 200);
+        let lines = render_counters(&rows, MetricKind::Time, None, 3, 200);
         assert!(lines[0].ends_with("ms"), "{}", lines[0]);
+    }
+
+    #[test]
+    fn metric_formatting_per_kind() {
+        assert_eq!(
+            format_metric(0.0015, MetricKind::Time, Some(TimeUnit::Millisecond), 3),
+            "1.500 ms"
+        );
+        assert_eq!(
+            format_metric((5 << 20) as f64, MetricKind::Bytes, None, 3),
+            "5.0 MB"
+        );
+        assert_eq!(
+            format_metric(12_345.0, MetricKind::Count, None, 3),
+            "12.345 k"
+        );
+    }
+
+    #[test]
+    fn counters_center_column_follows_kind() {
+        // A byte-kind metric renders center/σ as sizes, not durations.
+        let rows = [
+            counter_row(3, (2 << 20) as f64, Some((1 << 10) as f64), None),
+            counter_row(3, (4 << 20) as f64, Some((1 << 10) as f64), None),
+        ];
+        let lines = render_counters(&rows, MetricKind::Bytes, None, 3, 200);
+        assert!(lines[0].contains("MB"), "{}", lines[0]);
+        assert!(!lines[0].contains("ms"), "{}", lines[0]);
+        // A count-kind metric renders plain SI counts.
+        let rows = [counter_row(2, 12_345.0, None, None)];
+        let lines = render_counters(&rows, MetricKind::Count, None, 3, 200);
+        assert!(lines[0].contains("12.345 k"), "{}", lines[0]);
     }
 }

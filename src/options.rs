@@ -3,6 +3,7 @@ use tracing::debug;
 
 use crate::cli::Cli;
 use crate::format::TimeUnit;
+use crate::measurement::Metric;
 use crate::stats::Estimator;
 
 /// Destination of a measured command's stdout (--output). A file is truncated
@@ -61,8 +62,10 @@ pub struct Options {
     pub time_unit: Option<TimeUnit>,
     /// Digits after the decimal point for displayed times.
     pub precision: usize,
-    /// Central-value statistic reported for times and relative speeds.
+    /// Central-value statistic reported for the metric and relative ratios.
     pub estimator: Estimator,
+    /// The per-run quantity all statistics are computed on.
+    pub metric: Metric,
     /// Time only the command's `megafine_start()`/`megafine_stop()` region.
     pub region: bool,
     /// Calibrate the measurement floor against `/bin/true` before timing.
@@ -161,6 +164,21 @@ impl Options {
             .transpose()?
             .unwrap_or(Estimator::Mean);
 
+        let metric = cli
+            .metric
+            .as_deref()
+            .map(|s| {
+                Metric::parse(s).ok_or_else(|| {
+                    anyhow!(
+                        "invalid metric '{s}' (use time, user, sys, rss, major-faults, \
+                         minor-faults, vol-ctx, invol-ctx, instructions, cycles, \
+                         cache-misses or branch-misses)"
+                    )
+                })
+            })
+            .transpose()?
+            .unwrap_or(Metric::Time);
+
         if let Some(0) = cli.runs {
             bail!("--runs must be at least 1");
         }
@@ -244,9 +262,12 @@ impl Options {
             time_unit,
             precision: cli.precision,
             estimator,
+            metric,
             region: cli.region,
             calibrate: !cli.region && !cli.no_calibrate,
-            counters: cli.counters,
+            // Counter metrics need the counters; perf::probe() at startup
+            // still reports a clear error when perf events are unavailable.
+            counters: cli.counters || metric.needs_counters(),
             pin: !cli.no_pin,
             pin_reserved: cli.pin_reserved,
             sort,
@@ -338,6 +359,22 @@ mod tests {
         ));
         assert!(matches!(opts(&["a"]).unwrap().input, InputMode::Null));
         assert!(opts(&["--input", "/nonexistent/megafine-in", "a"]).is_err());
+    }
+
+    #[test]
+    fn metric_defaults_and_parsing() {
+        assert!(opts(&["a"]).unwrap().metric == Metric::Time);
+        assert!(opts(&["--metric", "rss", "a"]).unwrap().metric == Metric::Rss);
+        assert!(opts(&["--metric", "ipc", "a"]).is_err());
+        assert!(opts(&["--metric", "bogus", "a"]).is_err());
+    }
+
+    #[test]
+    fn counter_metric_auto_enables_counters() {
+        assert!(!opts(&["a"]).unwrap().counters);
+        assert!(opts(&["--metric", "instructions", "a"]).unwrap().counters);
+        // A non-counter metric leaves counters off.
+        assert!(!opts(&["--metric", "rss", "a"]).unwrap().counters);
     }
 
     #[test]
