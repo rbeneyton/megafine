@@ -239,6 +239,9 @@ apply), or if `--no-calibrate` option is used.
 - [x] --ignore-failure to keep timing commands that exit non-zero
 - [x] `--timeout SECONDS` to kill a task (whole process group) and treat it as
   a failed run
+- [x] stdout/stdin control for benchmarked commands (--output
+  null|inherit|FILE, --input FILE; `--output inherit` supersedes a dedicated
+  --show-output)
 
 ### [0.1.0] 2026-06-05
 

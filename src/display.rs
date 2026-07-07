@@ -71,10 +71,13 @@ pub fn spawn_display(
     jobs: usize,
     command_labels: Vec<String>,
     rx: flume::Receiver<DisplayMessage>,
+    disabled: bool,
 ) -> JoinHandle<()> {
     spawn(move || {
-        // Off a terminal (e.g. piped) we draw nothing and just wait for the end.
-        if !stderr().is_terminal() {
+        // Off a terminal (e.g. piped) we draw nothing and just wait for the
+        // end; same when disabled (--output inherit: redrawing over the
+        // children's own terminal writes would garble both).
+        if disabled || !stderr().is_terminal() {
             while rx.recv().is_ok() {}
             return;
         }

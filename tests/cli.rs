@@ -575,6 +575,71 @@ fn timeout_zero_errors() {
 }
 
 #[test]
+fn output_file_captures_stdout() {
+    let log = RunLog::new("output");
+    let path = log.0.display().to_string();
+    let out = run(&[
+        "--output",
+        &path,
+        "-r",
+        "2",
+        "-j",
+        "1",
+        "--no-calibrate",
+        "--no-pin",
+        "echo marker",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(log.lines(), ["marker"]); // truncated per run: last run only
+}
+
+#[test]
+fn output_inherit_shows_child_stdout() {
+    let out = run(&[
+        "--output",
+        "inherit",
+        "-r",
+        "1",
+        "--no-calibrate",
+        "--no-pin",
+        "echo marker",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("marker"), "stdout: {s}");
+    assert!(s.contains("Benchmark 1"), "stdout: {s}");
+}
+
+#[test]
+fn input_file_feeds_stdin() {
+    let input = RunLog::new("input");
+    std::fs::write(&input.0, "hello\n").unwrap();
+    let capture = RunLog::new("input-out");
+    let in_path = format!("{}", input.0.display());
+    let out_path = format!("{}", capture.0.display());
+    let out = run(&[
+        "--input",
+        &in_path,
+        "--output",
+        &out_path,
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "wc -c",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(capture.lines(), ["6"]); // every run reads from offset 0
+}
+
+#[test]
+fn missing_input_file_errors_before_running() {
+    let out = run(&["--input", "/nonexistent/megafine-in", "-r", "1", "true"]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("--input"), "stderr: {}", stderr(&out));
+}
+
+#[test]
 fn failing_command_errors() {
     let out = run(&["-r", "1", "--no-calibrate", "--no-pin", "false"]);
     assert!(!out.status.success());

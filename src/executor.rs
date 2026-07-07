@@ -11,7 +11,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 
 use crate::measurement::Execution;
-use crate::options::{Invocation, Options};
+use crate::options::{InputMode, Invocation, Options, OutputMode};
 use crate::perf;
 
 /// Largest amount of a failing command's stderr to keep for the error message.
@@ -54,11 +54,31 @@ impl Options {
         let region = measured && self.region;
         let command_line = &inv.line;
         let mut command = Command::new(&inv.argv[0]);
-        command
-            .args(&inv.argv[1..])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
+        command.args(&inv.argv[1..]).stderr(Stdio::piped());
+        // --output/--input only shape the timing runs; hooks keep null stdio.
+        match (measured, &self.input) {
+            (true, InputMode::File(path)) => {
+                let file = File::open(path)
+                    .with_context(|| format!("--input: cannot open '{}'", path.display()))?;
+                command.stdin(Stdio::from(file));
+            }
+            _ => {
+                command.stdin(Stdio::null());
+            }
+        }
+        match (measured, &self.output) {
+            (true, OutputMode::Inherit) => {
+                command.stdout(Stdio::inherit());
+            }
+            (true, OutputMode::File(path)) => {
+                let file = File::create(path)
+                    .with_context(|| format!("--output: cannot create '{}'", path.display()))?;
+                command.stdout(Stdio::from(file));
+            }
+            _ => {
+                command.stdout(Stdio::null());
+            }
+        }
         if let Some(id) = run_id {
             command.env("MEGAFINE_RUN_ID", id.to_string());
         }

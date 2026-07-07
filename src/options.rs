@@ -5,6 +5,21 @@ use crate::cli::Cli;
 use crate::format::TimeUnit;
 use crate::stats::Estimator;
 
+/// Destination of a measured command's stdout (--output). A file is truncated
+/// on every run, so it holds the last run's output.
+pub enum OutputMode {
+    Null,
+    Inherit,
+    File(std::path::PathBuf),
+}
+
+/// Source of a measured command's stdin (--input). A file is reopened on
+/// every run, so each run reads it from the start.
+pub enum InputMode {
+    Null,
+    File(std::path::PathBuf),
+}
+
 /// A command line pre-parsed into the argv it will be spawned with, so the
 /// parse happens once at startup (fail-fast) instead of on every run.
 pub struct Invocation {
@@ -26,6 +41,10 @@ pub struct Options {
     pub ignore_failure: bool,
     /// Kill a timing run's process group once it exceeds this duration.
     pub timeout: Option<std::time::Duration>,
+    /// stdout destination of the timing runs.
+    pub output: OutputMode,
+    /// stdin source of the timing runs.
+    pub input: InputMode,
     pub setup: Option<Invocation>,
     pub prepare: Option<Invocation>,
     pub conclude: Option<Invocation>,
@@ -154,6 +173,22 @@ impl Options {
             })
             .transpose()?;
 
+        // Keywords win over paths; a file literally named `null` is `./null`.
+        let output = match cli.output.as_deref() {
+            None | Some("null") => OutputMode::Null,
+            Some("inherit") => OutputMode::Inherit,
+            Some(path) => OutputMode::File(path.into()),
+        };
+        let input = match cli.input.as_deref() {
+            None | Some("null") => InputMode::Null,
+            Some(path) => {
+                // Fail fast: probe once here, reopened for every run.
+                std::fs::File::open(path)
+                    .with_context(|| format!("--input: cannot open '{path}'"))?;
+                InputMode::File(path.into())
+            }
+        };
+
         if cli.raw && cli.commands.len() < 2 {
             bail!("--raw needs at least 2 commands (it prints relative-speed ratios)");
         }
@@ -183,6 +218,8 @@ impl Options {
             shell,
             ignore_failure: cli.ignore_failure,
             timeout,
+            output,
+            input,
             setup: None,
             prepare: None,
             conclude: None,
@@ -264,6 +301,25 @@ mod tests {
             opts(&["--timeout", "1.5", "a"]).unwrap().timeout,
             Some(std::time::Duration::from_millis(1500))
         );
+    }
+
+    #[test]
+    fn output_input_parsing() {
+        assert!(matches!(opts(&["a"]).unwrap().output, OutputMode::Null));
+        assert!(matches!(
+            opts(&["--output", "null", "a"]).unwrap().output,
+            OutputMode::Null
+        ));
+        assert!(matches!(
+            opts(&["--output", "inherit", "a"]).unwrap().output,
+            OutputMode::Inherit
+        ));
+        assert!(matches!(
+            opts(&["--output", "out.log", "a"]).unwrap().output,
+            OutputMode::File(_)
+        ));
+        assert!(matches!(opts(&["a"]).unwrap().input, InputMode::Null));
+        assert!(opts(&["--input", "/nonexistent/megafine-in", "a"]).is_err());
     }
 
     #[test]

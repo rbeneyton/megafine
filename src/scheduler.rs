@@ -390,7 +390,12 @@ pub fn run_benchmarks(
     let (job_tx, job_rx) = bounded::<Task>(jobs);
     let (result_tx, result_rx) = unbounded::<RunReport>();
     let (display_tx, display_rx) = unbounded::<DisplayMessage>();
-    let display = spawn_display(jobs, command_labels, display_rx);
+    let display = spawn_display(
+        jobs,
+        command_labels,
+        display_rx,
+        matches!(options.output, crate::options::OutputMode::Inherit),
+    );
 
     let outcome = std::thread::scope(
         move |scope| -> Result<(Vec<BenchmarkResult>, Option<anyhow::Error>), anyhow::Error> {

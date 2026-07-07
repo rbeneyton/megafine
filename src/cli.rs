@@ -67,6 +67,15 @@ pub struct Cli {
     #[arg(long, value_name = "SECONDS", help_heading = "Execution")]
     pub timeout: Option<f64>,
 
+    /// Where the benchmarked command's stdout goes: null, inherit (disables
+    /// the live display), or a FILE truncated on every run [default: null].
+    #[arg(long, value_name = "WHERE", help_heading = "Execution")]
+    pub output: Option<String>,
+
+    /// What the benchmarked command reads on stdin: null or a FILE [default: null].
+    #[arg(long, value_name = "WHERE", help_heading = "Execution")]
+    pub input: Option<String>,
+
     /// Execute CMD once before the timing runs of each command.
     #[arg(short = 's', long, value_name = "CMD", help_heading = "Hooks")]
     pub setup: Option<String>,
