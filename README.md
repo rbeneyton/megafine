@@ -162,6 +162,15 @@ The baseline is the first command by default; `--reference IDX` picks the
 IDX-th command (1-based, matching the `Benchmark N:` numbering) instead, both
 here and in the normal ranking output.
 
+### Shell completions
+
+`--gen-completions SHELL` prints a completion script (bash, zsh, fish, …) on
+stdout. Redirect it wherever your shell looks for completions, e.g. for fish:
+
+```sh
+megafine --gen-completions fish > ~/.config/fish/completions/megafine.fish
+```
+
 ### Measurement floor
 
 megafine spawns commands with `posix_spawn` (vfork), so both the wall-clock and
@@ -226,6 +235,7 @@ apply), or if `--no-calibrate` option is used.
 - [x] allow to define a target stddev (ie. run until you've reached ±1%)
 - [x] Add --counters option with perf data, and full rusage fields
 - [x] `-L NAME @FILE` to read parameter values from a file, one per line
+- [x] `--gen-completions SHELL` to print a shell completion script
 
 ### [0.1.0] 2026-06-05
 

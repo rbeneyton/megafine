@@ -8,8 +8,17 @@ use clap::Parser;
 )]
 pub struct Cli {
     /// The command(s) to benchmark, or `-` to read them from stdin (one per line).
-    #[arg(required = true, num_args = 1.., value_name = "command")]
+    #[arg(required_unless_present = "completions", num_args = 1.., value_name = "command")]
     pub commands: Vec<String>,
+
+    /// Print the completion script for SHELL (bash, zsh, fish, …) on stdout and exit.
+    #[arg(
+        long = "gen-completions",
+        value_name = "SHELL",
+        hide = true,
+        help_heading = "Output"
+    )]
+    pub completions: Option<clap_complete::Shell>,
 
     #[arg(
         short = 'j',

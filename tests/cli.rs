@@ -456,6 +456,23 @@ fn runs_zero_errors() {
 }
 
 #[test]
+fn completions_emit_a_script() {
+    let out = run(&["--gen-completions", "bash"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        stdout(&out).contains("megafine"),
+        "stdout: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn no_command_still_errors() {
+    let out = run(&[]);
+    assert!(!out.status.success());
+}
+
+#[test]
 fn failing_command_errors() {
     let out = run(&["-r", "1", "--no-calibrate", "--no-pin", "false"]);
     assert!(!out.status.success());

@@ -31,6 +31,11 @@ fn main() -> Result<()> {
         .init();
 
     let mut cli = Cli::parse();
+    if let Some(shell) = cli.completions {
+        let mut cmd = <Cli as clap::CommandFactory>::command();
+        clap_complete::generate(shell, &mut cmd, "megafine", &mut std::io::stdout());
+        return Ok(());
+    }
     if cli.commands == ["-"] {
         cli.commands = command::from_stdin()?;
     }
