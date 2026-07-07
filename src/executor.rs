@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 
 use crate::measurement::Execution;
 use crate::options::{Invocation, Options};
+use crate::perf;
 
 /// Largest amount of a failing command's stderr to keep for the error message.
 const STDERR_CAP: usize = 8 * 1024;
@@ -74,6 +75,18 @@ impl Options {
             }
         }
 
+        // With --counters the child requests tracing, so the kernel freezes it
+        // at the entry of its exec: the parent attaches the counters while
+        // zero child instructions have run, then detaches (see perf.rs).
+        if self.counters {
+            unsafe {
+                command.pre_exec(|| match libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0) {
+                    -1 => Err(std::io::Error::last_os_error()),
+                    _ => Ok(()),
+                });
+            }
+        }
+
         let start = Instant::now();
         let mut child = command
             .spawn()
@@ -82,6 +95,38 @@ impl Options {
         if let Some((_, write_fd)) = region_pipe {
             unsafe { libc::close(write_fd) };
         }
+        // Attach to the exec-stopped child, then release it. The freeze is
+        // constant overhead on the wall clock, absorbed by calibration. On
+        // failure the child is killed and reaped rather than run unmeasured.
+        let counters = if self.counters {
+            let attach = |pid: i32| -> std::io::Result<perf::Counters> {
+                let mut status = 0;
+                if unsafe { libc::waitpid(pid, &mut status, 0) } < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if !libc::WIFSTOPPED(status) {
+                    return Err(std::io::Error::other("child not stopped at exec"));
+                }
+                let counters = perf::attach(pid)?;
+                // Detach with no signal: the exec SIGTRAP is suppressed.
+                if unsafe { libc::ptrace(libc::PTRACE_DETACH, pid, 0, 0) } == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(counters)
+            };
+            match attach(child.id() as i32) {
+                Ok(counters) => Some(counters),
+                Err(e) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(e).with_context(|| {
+                        format!("failed to attach perf counters to '{command_line}'")
+                    });
+                }
+            }
+        } else {
+            None
+        };
         // Reading to EOF drains the pipe and blocks until the child closes
         // stderr (≈ its exit), so wait4 then reaps immediately.
         let captured = child.stderr.take().map(drain_capped).unwrap_or_default();
@@ -104,6 +149,12 @@ impl Options {
                 .code()
                 .unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
             return Err(CommandFailed { code, message }.into());
+        }
+
+        if let Some(counters) = counters {
+            exec.counters = Some(counters.read().with_context(|| {
+                format!("failed to read the perf counters of '{command_line}'")
+            })?);
         }
 
         if let Some(window) = region_window {
@@ -246,6 +297,11 @@ fn wait4(child: &Child) -> Result<(ExitStatus, Execution)> {
             time_system: timeval_to_second(rusage.ru_stime),
             // ru_maxrss is reported in KiB on Linux.
             max_rss: (rusage.ru_maxrss.max(0) as u64) * 1024,
+            major_faults: rusage.ru_majflt.max(0) as u64,
+            minor_faults: rusage.ru_minflt.max(0) as u64,
+            vol_ctx_switches: rusage.ru_nvcsw.max(0) as u64,
+            invol_ctx_switches: rusage.ru_nivcsw.max(0) as u64,
+            counters: None,
         },
     ))
 }

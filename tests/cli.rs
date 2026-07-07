@@ -125,6 +125,35 @@ fn command_name_is_shown() {
 }
 
 #[test]
+fn rusage_extras_shown() {
+    let out = run(&["-r", "2", "--no-calibrate", "--no-pin", "sleep 0.01"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("Faults"), "stdout: {s}");
+    assert!(s.contains("CtxSw"), "stdout: {s}");
+}
+
+#[test]
+fn counters_reported_when_supported() {
+    let out = run(&[
+        "--counters",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "/bin/true",
+    ]);
+    if !out.status.success() {
+        // Kernels/VMs without perf access refuse at startup with a clear hint.
+        assert!(stderr(&out).contains("perf"), "stderr: {}", stderr(&out));
+        return;
+    }
+    let s = stdout(&out);
+    assert!(s.contains("instr"), "stdout: {s}");
+    assert!(s.contains("IPC"), "stdout: {s}");
+}
+
+#[test]
 fn target_stops_on_its_own() {
     // ±50% is reached as soon as the 10-run floor is; -j 1 makes the stop
     // deterministic, so exactly 10 measurements are collected.

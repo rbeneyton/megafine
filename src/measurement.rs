@@ -1,9 +1,11 @@
+use crate::perf::PerfCounts;
 use crate::stats;
 use crate::stats::Estimator;
 
 /// The measured outcome of one successful command execution: its wall-clock
 /// time and the resource usage reported by `wait4`. Only successful runs are
 /// kept in a `BenchmarkResult` (a non-zero exit is surfaced as an error instead).
+#[derive(Default)]
 pub struct Execution {
     /// Elapsed wall clock time, in seconds.
     pub wall_clock: f64,
@@ -13,6 +15,14 @@ pub struct Execution {
     pub time_system: f64,
     /// Peak resident set size, in bytes.
     pub max_rss: u64,
+    /// Major (I/O) and minor page faults.
+    pub major_faults: u64,
+    pub minor_faults: u64,
+    /// Voluntary and involuntary context switches.
+    pub vol_ctx_switches: u64,
+    pub invol_ctx_switches: u64,
+    /// Hardware counters, when --counters is on.
+    pub counters: Option<PerfCounts>,
 }
 
 /// All measurements collected for one benchmarked command.
@@ -99,9 +109,7 @@ mod tests {
                 .iter()
                 .map(|&wall_clock| Execution {
                     wall_clock,
-                    time_user: 0.0,
-                    time_system: 0.0,
-                    max_rss: 0,
+                    ..Default::default()
                 })
                 .collect(),
         }

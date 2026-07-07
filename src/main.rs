@@ -6,6 +6,7 @@ mod format;
 mod measurement;
 mod options;
 mod parameter;
+mod perf;
 mod scheduler;
 mod stats;
 
@@ -19,7 +20,7 @@ use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::Cli;
-use crate::format::{auto_unit, format_bytes, format_time, relative_cell, truncate};
+use crate::format::{auto_unit, format_bytes, format_count, format_time, relative_cell, truncate};
 use crate::measurement::{BenchmarkResult, NormBenchmark, compute};
 use crate::options::Options;
 
@@ -39,6 +40,9 @@ fn main() -> Result<()> {
     let cli = cli;
 
     let options = Options::from_cli(&cli)?;
+    if options.counters {
+        perf::probe()?;
+    }
     let interrupted = Arc::new(AtomicBool::new(false));
 
     let commands = command::from_cli(&cli);
@@ -176,6 +180,39 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
                     times.len(),
                 );
             }
+        }
+
+        println!(
+            "  Faults ({}/{}):  {} / {}    CtxSw ({}/{}):  {} / {}",
+            "maj".cyan(),
+            "min".purple(),
+            format_count(center_of(result.times(|e| e.major_faults as f64))).blue(),
+            format_count(center_of(result.times(|e| e.minor_faults as f64))).blue(),
+            "vol".cyan(),
+            "invol".purple(),
+            format_count(center_of(result.times(|e| e.vol_ctx_switches as f64))).blue(),
+            format_count(center_of(result.times(|e| e.invol_ctx_switches as f64))).blue(),
+        );
+
+        if result.measurements.iter().all(|e| e.counters.is_some()) {
+            let counter = |get: fn(&perf::PerfCounts) -> u64| {
+                center_of(result.times(|e| get(e.counters.as_ref().unwrap()) as f64))
+            };
+            let instructions = counter(|c| c.instructions);
+            let cycles = counter(|c| c.cycles);
+            let ipc = if cycles > 0.0 {
+                instructions / cycles
+            } else {
+                0.0
+            };
+            println!(
+                "  Counters:  {} instr, {} cycles, IPC {}, {} cache-miss, {} branch-miss",
+                format_count(instructions).blue(),
+                format_count(cycles).blue(),
+                format!("{ipc:.2}").blue(),
+                format_count(counter(|c| c.cache_misses)).blue(),
+                format_count(counter(|c| c.branch_misses)).blue(),
+            );
         }
 
         println!();

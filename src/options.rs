@@ -35,6 +35,8 @@ pub struct Options {
     pub region: bool,
     /// Calibrate the measurement floor against `/bin/true` before timing.
     pub calibrate: bool,
+    /// Collect hardware perf counters for every run.
+    pub counters: bool,
     /// Pin each concurrent job to its own disjoint subset of the allowed CPUs.
     pub pin: bool,
     /// CPUs booked for megafine's own threads, excluded from the workers' partition.
@@ -174,6 +176,7 @@ impl Options {
             estimator,
             region: cli.region,
             calibrate: !cli.region && !cli.no_calibrate,
+            counters: cli.counters,
             pin: !cli.no_pin,
             pin_reserved: cli.pin_reserved,
             raw: cli.raw,

@@ -114,6 +114,22 @@ pub fn truncate(s: &str, max: usize) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// Format a large count with an SI suffix: `1234567` → `1.235 M`; values
+/// under 10 000 stay plain integers.
+pub fn format_count(v: f64) -> String {
+    const UNITS: [&str; 4] = ["k", "M", "G", "T"];
+    if v < 10_000.0 {
+        return format!("{v:.0}");
+    }
+    let mut v = v / 1000.0;
+    let mut unit = 0;
+    while v >= 1000.0 && unit < UNITS.len() - 1 {
+        v /= 1000.0;
+        unit += 1;
+    }
+    format!("{v:.3} {}", UNITS[unit])
+}
+
 /// A row's live relation to the reference command, mirroring the final ranking.
 #[derive(Clone, Copy)]
 pub enum Relative {
@@ -142,6 +158,15 @@ pub fn relative_cell(
     cell
 }
 
+/// A row's live perf-counter column values: means over the runs so far.
+#[derive(Clone, Copy)]
+pub struct PerfCell {
+    pub instr: f64,
+    pub ipc: f64,
+    pub cache_misses: f64,
+    pub branch_misses: f64,
+}
+
 /// One command's live progress, in raw values; rendered together with its peers.
 pub struct CounterRow<'a> {
     pub label: &'a str,
@@ -150,6 +175,8 @@ pub struct CounterRow<'a> {
     pub center: f64,
     pub std: Option<f64>,
     pub peak_rss: u64,
+    /// The perf-counter columns, when --counters is on.
+    pub perf: Option<PerfCell>,
     /// Standing against the reference command, when it can already be shown.
     pub relative: Option<Relative>,
 }
@@ -210,6 +237,16 @@ pub fn render_counters(
             .max()
             .unwrap()
     });
+    let perf_w = |cell: fn(&PerfCell) -> String| {
+        present
+            .iter()
+            .filter_map(|r| r.perf.as_ref().map(|p| cell(p).len()))
+            .max()
+    };
+    let instr_w = perf_w(|p| format_count(p.instr));
+    let ipc_w = perf_w(|p| format!("{:.2}", p.ipc));
+    let cache_w = perf_w(|p| format_count(p.cache_misses));
+    let branch_w = perf_w(|p| format_count(p.branch_misses));
 
     // The relative column mirrors the final ranking's tail: `reference` on the
     // reference row, `+x.xx% (± u.uu)` on the others, decimal-aligned.
@@ -253,13 +290,21 @@ pub fn render_counters(
         (Some(u), Some(rw)) => 7 + rw + 1 + BYTE_UNITS[u].chars().count(),
         _ => 0,
     };
+    let perf_tail = match (instr_w, ipc_w, cache_w, branch_w) {
+        // "  {i} instr  IPC {p}  {c} cache-miss  {b} branch-miss"
+        (Some(iw), Some(pw), Some(cw), Some(bw)) => {
+            (2 + iw + 6) + (2 + 4 + pw) + (2 + cw + 11) + (2 + bw + 12)
+        }
+        _ => 0,
+    };
     let rel_w = rel_cells
         .iter()
         .map(|c| c.chars().count())
         .max()
         .unwrap_or(0);
     let rel_tail = if rel_w > 0 { 2 + rel_w } else { 0 };
-    let label_w = label_w.min(budget.saturating_sub(fixed_tail + std_tail + peak_tail + rel_tail));
+    let label_w = label_w
+        .min(budget.saturating_sub(fixed_tail + std_tail + peak_tail + perf_tail + rel_tail));
 
     rows.iter()
         .zip(&rel_cells)
@@ -292,6 +337,17 @@ pub fn render_counters(
                     "  peak {:>rw$} {}",
                     format_byte_value(x.peak_rss, u),
                     BYTE_UNITS[u],
+                ));
+            }
+            if let (Some(p), Some(iw), Some(pw), Some(cw), Some(bw)) =
+                (&x.perf, instr_w, ipc_w, cache_w, branch_w)
+            {
+                line.push_str(&format!(
+                    "  {:>iw$} instr  IPC {:>pw$}  {:>cw$} cache-miss  {:>bw$} branch-miss",
+                    format_count(p.instr),
+                    format!("{:.2}", p.ipc),
+                    format_count(p.cache_misses),
+                    format_count(p.branch_misses),
                 ));
             }
             if !rel.is_empty() {
@@ -339,6 +395,15 @@ mod tests {
     }
 
     #[test]
+    fn count_formatting() {
+        assert_eq!(format_count(3.0), "3");
+        assert_eq!(format_count(9_999.0), "9999");
+        assert_eq!(format_count(12_345.0), "12.345 k");
+        assert_eq!(format_count(1_234_567.0), "1.235 M");
+        assert_eq!(format_count(2.5e12), "2.500 T");
+    }
+
+    #[test]
     fn duration_formatting() {
         assert_eq!(format_duration(0.4), "0 s");
         assert_eq!(format_duration(42.4), "42 s");
@@ -383,6 +448,7 @@ mod tests {
             center,
             std,
             peak_rss: 0,
+            perf: None,
             relative,
         }
     }

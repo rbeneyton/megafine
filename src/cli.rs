@@ -69,6 +69,11 @@ pub struct Cli {
     #[arg(short = 'R', long, help_heading = "Measurement")]
     pub region: bool,
 
+    /// Also collect hardware counters per run via perf events (user space, whole child tree):
+    /// instructions retired, CPU cycles, IPC, cache misses and branch misses.
+    #[arg(long, help_heading = "Measurement")]
+    pub counters: bool,
+
     /// Skip the /bin/true calibration that establishes the measurement floor.
     #[arg(long, help_heading = "Measurement")]
     pub no_calibrate: bool,

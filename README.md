@@ -224,6 +224,7 @@ apply), or if `--no-calibrate` option is used.
 - [x] Return task stderr on error
 - [x] support parameters
 - [x] allow to define a target stddev (ie. run until you've reached ±1%)
+- [x] Add --counters option with perf data, and full rusage fields
 
 ### [0.1.0] 2026-06-05
 

@@ -10,7 +10,8 @@ use crate::command::Command;
 use crate::display::{DisplayMessage, spawn_display, term_width};
 use crate::executor::{allowed_cpus, partition, pin_thread};
 use crate::format::{
-    CounterRow, Relative, auto_unit, format_bytes, format_duration, format_time, render_counters,
+    CounterRow, PerfCell, Relative, auto_unit, format_bytes, format_duration, format_time,
+    render_counters,
 };
 use crate::measurement::{BenchmarkResult, Execution};
 use crate::options::{Invocation, Options};
@@ -276,12 +277,32 @@ fn publish_counters(
             } else {
                 None
             };
+            // Mean counter values, once every run carries counters.
+            let perf =
+                (count > 0 && s.measurements.iter().all(|e| e.counters.is_some())).then(|| {
+                    let (mut instr, mut cycles, mut cache, mut branch) = (0.0f64, 0.0, 0.0, 0.0);
+                    for e in &s.measurements {
+                        let c = e.counters.as_ref().unwrap();
+                        instr += c.instructions as f64;
+                        cycles += c.cycles as f64;
+                        cache += c.cache_misses as f64;
+                        branch += c.branch_misses as f64;
+                    }
+                    let n = s.measurements.len() as f64;
+                    PerfCell {
+                        instr: instr / n,
+                        ipc: if cycles > 0.0 { instr / cycles } else { 0.0 },
+                        cache_misses: cache / n,
+                        branch_misses: branch / n,
+                    }
+                });
             CounterRow {
                 label: &s.spec.label,
                 count,
                 center,
                 std,
                 peak_rss: s.max_rss,
+                perf,
                 relative,
             }
         })
