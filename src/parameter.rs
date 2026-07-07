@@ -22,10 +22,34 @@ fn decimals(s: &str) -> usize {
 fn axes(cli: &Cli) -> Result<Vec<Axis>> {
     let mut axes = Vec::new();
     for pair in cli.parameter_list.chunks_exact(2) {
-        let values: Vec<String> = pair[1].split(',').map(str::to_string).collect();
-        if values.iter().any(String::is_empty) {
-            bail!("--parameter-list {} has an empty value", pair[0]);
-        }
+        // `@FILE` reads one value per line (trimmed, blank lines skipped).
+        let values: Vec<String> = match pair[1].strip_prefix('@') {
+            Some(path) => {
+                let text = std::fs::read_to_string(path).with_context(|| {
+                    format!(
+                        "--parameter-list {}: cannot read values from '{path}'",
+                        pair[0]
+                    )
+                })?;
+                let values: Vec<String> = text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                if values.is_empty() {
+                    bail!("--parameter-list {}: file '{path}' has no values", pair[0]);
+                }
+                values
+            }
+            None => {
+                let values: Vec<String> = pair[1].split(',').map(str::to_string).collect();
+                if values.iter().any(String::is_empty) {
+                    bail!("--parameter-list {} has an empty value", pair[0]);
+                }
+                values
+            }
+        };
         axes.push(Axis {
             name: pair[0].clone(),
             values,
@@ -186,6 +210,29 @@ mod tests {
         ]);
         let (cmds, _) = expand(&c).unwrap();
         assert_eq!(cmds, ["echo 0.0", "echo 0.5", "echo 1.0"]);
+    }
+
+    #[test]
+    fn list_from_file() {
+        let path = std::env::temp_dir().join(format!("megafine-params-{}", std::process::id()));
+        std::fs::write(&path, "1\n\n  2  \n").unwrap();
+        let arg = format!("@{}", path.display());
+        let c = cli(&["-L", "a", &arg, "echo {a}"]);
+        let result = expand(&c);
+        std::fs::remove_file(&path).unwrap();
+        let (cmds, _) = result.unwrap();
+        assert_eq!(cmds, ["echo 1", "echo 2"]);
+    }
+
+    #[test]
+    fn list_file_errors() {
+        assert!(expand(&cli(&["-L", "a", "@/nonexistent/megafine-params", "a"])).is_err());
+        let path = std::env::temp_dir().join(format!("megafine-empty-{}", std::process::id()));
+        std::fs::write(&path, "\n  \n").unwrap();
+        let arg = format!("@{}", path.display());
+        let result = expand(&cli(&["-L", "a", &arg, "a"]));
+        std::fs::remove_file(&path).unwrap();
+        assert!(result.is_err());
     }
 
     #[test]

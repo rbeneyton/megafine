@@ -208,6 +208,28 @@ fn parameter_list_expands_commands() {
 }
 
 #[test]
+fn parameter_list_reads_values_from_file() {
+    let path = std::env::temp_dir().join(format!("megafine-Lfile-{}", std::process::id()));
+    std::fs::write(&path, "0.02\n0.03\n").unwrap();
+    let arg = format!("@{}", path.display());
+    let out = run(&[
+        "-L",
+        "d",
+        &arg,
+        "-r",
+        "1",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep {d}",
+    ]);
+    let _ = std::fs::remove_file(&path);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("sleep 0.02"), "stdout: {s}");
+    assert!(s.contains("Benchmark 2"), "stdout: {s}");
+}
+
+#[test]
 fn unknown_parameter_errors() {
     let out = run(&["-L", "d", "1", "-r", "1", "--no-calibrate", "sleep {x}"]);
     assert!(!out.status.success());
