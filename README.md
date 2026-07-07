@@ -242,6 +242,7 @@ apply), or if `--no-calibrate` option is used.
 - [x] stdout/stdin control for benchmarked commands (--output
   null|inherit|FILE, --input FILE; `--output inherit` supersedes a dedicated
   --show-output)
+- [x] `--sort command|metric` to order the ranking table
 
 ### [0.1.0] 2026-06-05
 

@@ -22,7 +22,7 @@ use tracing_subscriber::EnvFilter;
 use crate::cli::Cli;
 use crate::format::{auto_unit, format_bytes, format_count, format_time, relative_cell, truncate};
 use crate::measurement::{BenchmarkResult, NormBenchmark, compute};
-use crate::options::Options;
+use crate::options::{Options, Sort};
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -337,9 +337,14 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
     // Pad manually: bolding "Results" embeds ANSI codes that {:<col$} would miscount.
     let pad = " ".repeat(col.saturating_sub("Results".len()));
     println!("{}{pad}  {}", "Results".bold(), "Rank".bold());
-    for ((left, width), r) in rows.iter().zip(&rank) {
+    let display: Vec<usize> = match options.sort {
+        Sort::Command => (0..rows.len()).collect(),
+        Sort::Metric => order,
+    };
+    for &i in &display {
+        let (left, width) = &rows[i];
         let pad = " ".repeat(col - width);
-        println!("{left}{pad}  {}", r.to_string().bold());
+        println!("{left}{pad}  {}", rank[i].to_string().bold());
     }
 
     // Welch's t-test against the reference: flag the rows whose difference

@@ -640,6 +640,40 @@ fn missing_input_file_errors_before_running() {
 }
 
 #[test]
+fn sort_metric_puts_best_first() {
+    let out = run(&[
+        "--sort",
+        "metric",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.05",
+        "sleep 0.02",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    let first_row = s
+        .lines()
+        .skip_while(|l| !l.starts_with("Results"))
+        .nth(1)
+        .expect("a first ranking row");
+    assert!(first_row.contains("sleep 0.02"), "row: {first_row}");
+    assert!(first_row.trim_end().ends_with('1'), "row: {first_row}");
+}
+
+#[test]
+fn sort_bogus_errors() {
+    let out = run(&["--sort", "bogus", "-r", "1", "a", "b"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("invalid sort order"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn failing_command_errors() {
     let out = run(&["-r", "1", "--no-calibrate", "--no-pin", "false"]);
     assert!(!out.status.success());

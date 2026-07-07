@@ -163,6 +163,11 @@ pub struct Cli {
     #[arg(long, value_name = "ESTIMATOR", help_heading = "Output")]
     pub estimator: Option<String>,
 
+    /// Row order of the ranking table: command (input order) or metric (best
+    /// first) [default: command].
+    #[arg(long, value_name = "ORDER", help_heading = "Output")]
+    pub sort: Option<String>,
+
     /// Print only the relative-speed ratios (one per line, command order,
     /// reference = first command or --reference) on stdout, for scripts.
     #[arg(long, help_heading = "Output")]

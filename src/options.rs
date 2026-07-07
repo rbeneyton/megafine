@@ -20,6 +20,15 @@ pub enum InputMode {
     File(std::path::PathBuf),
 }
 
+/// Row order of the ranking table (--sort).
+#[derive(PartialEq)]
+pub enum Sort {
+    /// The commands' input order (the `Benchmark N` numbering).
+    Command,
+    /// Best central value first.
+    Metric,
+}
+
 /// A command line pre-parsed into the argv it will be spawned with, so the
 /// parse happens once at startup (fail-fast) instead of on every run.
 pub struct Invocation {
@@ -64,6 +73,8 @@ pub struct Options {
     pub pin: bool,
     /// CPUs booked for megafine's own threads, excluded from the workers' partition.
     pub pin_reserved: usize,
+    /// Row order of the ranking table.
+    pub sort: Sort,
     /// Print only the relative-speed ratios on stdout.
     pub raw: bool,
     /// 0-based index of the command used as the relative-speed baseline.
@@ -189,6 +200,12 @@ impl Options {
             }
         };
 
+        let sort = match cli.sort.as_deref() {
+            None | Some("command") => Sort::Command,
+            Some("metric") => Sort::Metric,
+            Some(s) => bail!("invalid sort order '{s}' (use command or metric)"),
+        };
+
         if cli.raw && cli.commands.len() < 2 {
             bail!("--raw needs at least 2 commands (it prints relative-speed ratios)");
         }
@@ -232,6 +249,7 @@ impl Options {
             counters: cli.counters,
             pin: !cli.no_pin,
             pin_reserved: cli.pin_reserved,
+            sort,
             raw: cli.raw,
             reference,
         };
@@ -320,6 +338,13 @@ mod tests {
         ));
         assert!(matches!(opts(&["a"]).unwrap().input, InputMode::Null));
         assert!(opts(&["--input", "/nonexistent/megafine-in", "a"]).is_err());
+    }
+
+    #[test]
+    fn sort_parsing() {
+        assert!(opts(&["a"]).unwrap().sort == Sort::Command);
+        assert!(opts(&["--sort", "metric", "a"]).unwrap().sort == Sort::Metric);
+        assert!(opts(&["--sort", "time", "a"]).is_err());
     }
 
     #[test]
