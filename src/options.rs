@@ -24,6 +24,8 @@ pub struct Options {
     pub shell: Option<String>,
     /// Keep timing runs that exit non-zero as failed measurements.
     pub ignore_failure: bool,
+    /// Kill a timing run's process group once it exceeds this duration.
+    pub timeout: Option<std::time::Duration>,
     pub setup: Option<Invocation>,
     pub prepare: Option<Invocation>,
     pub conclude: Option<Invocation>,
@@ -142,6 +144,16 @@ impl Options {
             }
         }
 
+        let timeout = cli
+            .timeout
+            .map(|s| {
+                if s <= 0.0 || !s.is_finite() {
+                    bail!("--timeout must be positive");
+                }
+                Ok(std::time::Duration::from_secs_f64(s))
+            })
+            .transpose()?;
+
         if cli.raw && cli.commands.len() < 2 {
             bail!("--raw needs at least 2 commands (it prints relative-speed ratios)");
         }
@@ -170,6 +182,7 @@ impl Options {
             target: cli.target,
             shell,
             ignore_failure: cli.ignore_failure,
+            timeout,
             setup: None,
             prepare: None,
             conclude: None,
@@ -241,6 +254,16 @@ mod tests {
     fn ignore_failure_plumbs() {
         assert!(!opts(&["a"]).unwrap().ignore_failure);
         assert!(opts(&["-i", "a"]).unwrap().ignore_failure);
+    }
+
+    #[test]
+    fn timeout_validation() {
+        assert!(opts(&["--timeout", "0", "a"]).is_err());
+        assert!(opts(&["--timeout=-1", "a"]).is_err());
+        assert_eq!(
+            opts(&["--timeout", "1.5", "a"]).unwrap().timeout,
+            Some(std::time::Duration::from_millis(1500))
+        );
     }
 
     #[test]

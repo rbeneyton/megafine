@@ -62,6 +62,11 @@ pub struct Cli {
     #[arg(short = 'i', long, help_heading = "Execution")]
     pub ignore_failure: bool,
 
+    /// Kill a timing run (whole process group) after SECONDS and treat it as
+    /// a failed run (aborts the benchmark unless --ignore-failure).
+    #[arg(long, value_name = "SECONDS", help_heading = "Execution")]
+    pub timeout: Option<f64>,
+
     /// Execute CMD once before the timing runs of each command.
     #[arg(short = 's', long, value_name = "CMD", help_heading = "Hooks")]
     pub setup: Option<String>,

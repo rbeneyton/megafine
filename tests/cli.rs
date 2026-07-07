@@ -520,6 +520,61 @@ fn ignore_failure_keeps_hooks_strict() {
 }
 
 #[test]
+fn timeout_kills_the_process_group() {
+    // sh's sleep grandchild holds the stderr pipe open, so this also proves
+    // the whole group dies (otherwise the drain would block ~10s).
+    let started = std::time::Instant::now();
+    let out = run(&[
+        "--timeout",
+        "0.2",
+        "-r",
+        "1",
+        "--no-calibrate",
+        "--no-pin",
+        "sh -c 'sleep 10'",
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        started.elapsed().as_secs() < 5,
+        "took {:?}",
+        started.elapsed()
+    );
+    assert!(
+        stderr(&out).contains("timed out"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn timeout_with_ignore_failure_keeps_runs() {
+    let out = run(&[
+        "--timeout",
+        "0.2",
+        "-i",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 10",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("2 of 2 runs exited non-zero"), "stdout: {s}");
+}
+
+#[test]
+fn timeout_zero_errors() {
+    let out = run(&["--timeout", "0", "-r", "1", "a"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("--timeout must be positive"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn failing_command_errors() {
     let out = run(&["-r", "1", "--no-calibrate", "--no-pin", "false"]);
     assert!(!out.status.success());

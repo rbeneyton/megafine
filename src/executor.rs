@@ -4,6 +4,8 @@ use std::mem::MaybeUninit;
 use std::os::fd::FromRawFd;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -78,6 +80,19 @@ impl Options {
             }
         }
 
+        // A timed-out run is killed as a whole process group (a shell's
+        // grandchildren would otherwise survive and keep stderr open), so the
+        // child becomes its own group leader.
+        let timeout = if measured { self.timeout } else { None };
+        if timeout.is_some() {
+            unsafe {
+                command.pre_exec(|| match libc::setpgid(0, 0) {
+                    -1 => Err(std::io::Error::last_os_error()),
+                    _ => Ok(()),
+                });
+            }
+        }
+
         // With --counters the child requests tracing, so the kernel freezes it
         // at the entry of its exec: the parent attaches the counters while
         // zero child instructions have run, then detaches (see perf.rs).
@@ -130,6 +145,53 @@ impl Options {
         } else {
             None
         };
+        // The stderr drain below blocks until the child tree exits, so the
+        // timeout is enforced from a thread polling a pidfd: on expiry it
+        // SIGKILLs the process group. The group leader cannot be reaped
+        // before our wait4 (the drain runs first), so the pgid cannot be
+        // recycled — no pid-reuse race.
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let killer = timeout
+            .map(|limit| {
+                let pid = child.id() as i32;
+                let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as libc::c_int;
+                if pidfd < 0 {
+                    let e = std::io::Error::last_os_error();
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(anyhow::Error::new(e)
+                        .context(format!("pidfd_open failed for command '{command_line}'")));
+                }
+                let deadline = start + limit;
+                let flag = Arc::clone(&timed_out);
+                Ok(std::thread::spawn(move || {
+                    let mut fds = libc::pollfd {
+                        fd: pidfd,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                    loop {
+                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        let ms = remaining.as_millis().min(i32::MAX as u128) as i32;
+                        match unsafe { libc::poll(&mut fds, 1, ms) } {
+                            0 => {
+                                flag.store(true, Ordering::Relaxed);
+                                unsafe { libc::kill(-pid, libc::SIGKILL) };
+                            }
+                            -1 if std::io::Error::last_os_error().kind()
+                                == std::io::ErrorKind::Interrupted =>
+                            {
+                                continue;
+                            }
+                            _ => {} // the child exited, nothing to kill
+                        }
+                        break;
+                    }
+                    unsafe { libc::close(pidfd) };
+                }))
+            })
+            .transpose()?;
+
         // Reading to EOF drains the pipe and blocks until the child closes
         // stderr (≈ its exit), so wait4 then reaps immediately.
         let captured = child.stderr.take().map(drain_capped).unwrap_or_default();
@@ -138,6 +200,10 @@ impl Options {
         let (status, mut exec) = wait4(&child)
             .with_context(|| format!("failed to wait for command '{command_line}'"))?;
         exec.wall_clock = start.elapsed().as_secs_f64();
+        // Returns immediately: the pidfd is readable once the child terminated.
+        if let Some(handle) = killer {
+            let _ = handle.join();
+        }
 
         if !status.success() {
             if measured && self.ignore_failure {
@@ -145,9 +211,18 @@ impl Options {
             } else {
                 let stderr = String::from_utf8_lossy(&captured);
                 let stderr = stderr.trim_end();
-                let mut message = format!(
-                    "command '{command_line}' terminated with a non-zero exit code ({status})"
-                );
+                let mut message = if timed_out.load(Ordering::Relaxed) {
+                    format!(
+                        "command '{command_line}' timed out after {}s (killed)",
+                        timeout
+                            .expect("timed_out is only set by the killer thread")
+                            .as_secs_f64()
+                    )
+                } else {
+                    format!(
+                        "command '{command_line}' terminated with a non-zero exit code ({status})"
+                    )
+                };
                 if !stderr.is_empty() {
                     message.push_str(&format!("\n--- stderr ---\n{stderr}"));
                 }
