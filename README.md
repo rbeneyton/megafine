@@ -44,7 +44,6 @@ printf 'sleep %s\n' (seq 1 8) | megafine -j 2 -
 - no Windows/MacOS support
 - no export in many formats (markdown, json, …)
 - no shell specification, either current one or direct execution
-- no parameter scan
 - GPL instead of MIT
 
 ## History
@@ -224,6 +223,7 @@ apply), or if `--no-calibrate` option is used.
 - [x] Avoid flooding refresh operations
 - [x] Decode commands once at startup
 - [x] Return task stderr on error
+- [x] support parameters
 
 ### [0.1.0] 2026-06-05
 

@@ -125,6 +125,36 @@ fn command_name_is_shown() {
 }
 
 #[test]
+fn parameter_list_expands_commands() {
+    let out = run(&[
+        "-L",
+        "d",
+        "0.02,0.03",
+        "-r",
+        "1",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep {d}",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("sleep 0.02"), "stdout: {s}");
+    assert!(s.contains("sleep 0.03"), "stdout: {s}");
+    assert!(s.contains("Benchmark 2"), "stdout: {s}");
+}
+
+#[test]
+fn unknown_parameter_errors() {
+    let out = run(&["-L", "d", "1", "-r", "1", "--no-calibrate", "sleep {x}"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("unknown parameter"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn reads_commands_from_stdin() {
     let mut child = mf()
         .args(["--no-calibrate", "--no-pin", "-r", "2", "-"])

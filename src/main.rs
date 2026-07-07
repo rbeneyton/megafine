@@ -5,6 +5,7 @@ mod executor;
 mod format;
 mod measurement;
 mod options;
+mod parameter;
 mod scheduler;
 mod stats;
 
@@ -31,6 +32,9 @@ fn main() -> Result<()> {
     let mut cli = Cli::parse();
     if cli.commands == ["-"] {
         cli.commands = command::from_stdin()?;
+    }
+    if !cli.parameter_list.is_empty() || !cli.parameter_scan.is_empty() {
+        (cli.commands, cli.command_name) = parameter::expand(&cli)?;
     }
     let cli = cli;
 

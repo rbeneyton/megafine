@@ -82,6 +82,25 @@ pub struct Cli {
     )]
     pub pin_reserved: usize,
 
+    /// Benchmark each command once per VALUE, substituting it for `{NAME}` in
+    /// the command (and -n names). Repeatable; several lists multiply.
+    #[arg(short = 'L', long = "parameter-list", num_args = 2, value_names = ["NAME", "VALUES"], help_heading = "Parameters")]
+    pub parameter_list: Vec<String>,
+
+    /// Benchmark each command once per value of NAME = MIN..=MAX (stepped by
+    /// --parameter-step-size), substituting it for `{NAME}`.
+    #[arg(short = 'P', long = "parameter-scan", num_args = 3, value_names = ["NAME", "MIN", "MAX"], help_heading = "Parameters")]
+    pub parameter_scan: Vec<String>,
+
+    /// Step between two consecutive --parameter-scan values.
+    #[arg(
+        long,
+        value_name = "STEP",
+        default_value_t = 1.0,
+        help_heading = "Parameters"
+    )]
+    pub parameter_step_size: f64,
+
     /// Display names for the commands, in order (one per command), should be last argument.
     #[arg(short = 'n', long = "command-name", value_name = "NAME", num_args = 1.., help_heading = "Output")]
     pub command_name: Vec<String>,
