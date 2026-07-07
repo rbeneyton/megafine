@@ -249,6 +249,8 @@ apply), or if `--no-calibrate` option is used.
 - [x] `--parameter-step-n NUM` to split a `--parameter-scan` range into NUM
   equal steps (NUM+1 values) instead of a fixed step size; incompatible with
   `--parameter-step-size`
+- [x] `--parameter-step-log` to space the `--parameter-step-n` steps
+  geometrically (log scale) between MIN and MAX; MIN must be positive
 
 ### [0.1.0] 2026-06-05
 

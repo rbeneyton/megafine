@@ -161,6 +161,11 @@ pub struct Cli {
     )]
     pub parameter_step_n: Option<usize>,
 
+    /// Space the --parameter-step-n steps geometrically (logarithmically)
+    /// between MIN and MAX instead of linearly; MIN must be positive.
+    #[arg(long, requires = "parameter_step_n", help_heading = "Parameters")]
+    pub parameter_step_log: bool,
+
     /// Display names for the commands, in order (one per command), should be last argument.
     #[arg(short = 'n', long = "command-name", value_name = "NAME", num_args = 1.., help_heading = "Output")]
     pub command_name: Vec<String>,

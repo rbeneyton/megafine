@@ -98,10 +98,29 @@ fn axes(cli: &Cli) -> Result<Vec<Axis>> {
                 if n + 1 > MAX_COMMANDS {
                     bail!("--parameter-scan {} yields too many values", triple[0]);
                 }
-                let step = (max - min) / n as f64;
-                let points: Vec<f64> = (0..=n)
-                    .map(|i| if i == n { max } else { min + i as f64 * step })
-                    .collect();
+                // Endpoints are pinned exactly; interior points are linear or
+                // geometric between them.
+                let points: Vec<f64> = if cli.parameter_step_log {
+                    if min <= 0.0 {
+                        bail!(
+                            "--parameter-scan {}: MIN must be positive with --parameter-step-log",
+                            triple[0]
+                        );
+                    }
+                    let ratio = (max / min).powf(1.0 / n as f64);
+                    (0..=n)
+                        .map(|i| match i {
+                            0 => min,
+                            i if i == n => max,
+                            i => min * ratio.powi(i as i32),
+                        })
+                        .collect()
+                } else {
+                    let step = (max - min) / n as f64;
+                    (0..=n)
+                        .map(|i| if i == n { max } else { min + i as f64 * step })
+                        .collect()
+                };
                 let d = scan_decimals(&points, bound_d);
                 points.iter().map(|v| format!("{v:.d$}")).collect()
             }
@@ -323,6 +342,51 @@ mod tests {
         assert!(expand(&cli(&["-P", "n", "1", "3", "--parameter-step-n", "0", "a"])).is_err());
         // MIN == MAX has no steps to divide.
         assert!(expand(&cli(&["-P", "n", "5", "5", "--parameter-step-n", "2", "a"])).is_err());
+    }
+
+    #[test]
+    fn scan_step_log_is_geometric() {
+        let c = cli(&[
+            "-P",
+            "s",
+            "1",
+            "1000",
+            "--parameter-step-n",
+            "3",
+            "--parameter-step-log",
+            "echo {s}",
+        ]);
+        let (cmds, _) = expand(&c).unwrap();
+        assert_eq!(cmds, ["echo 1", "echo 10", "echo 100", "echo 1000"]);
+    }
+
+    #[test]
+    fn scan_step_log_needs_positive_min() {
+        let c = cli(&[
+            "-P",
+            "s",
+            "0",
+            "100",
+            "--parameter-step-n",
+            "2",
+            "--parameter-step-log",
+            "a",
+        ]);
+        assert!(expand(&c).is_err());
+    }
+
+    #[test]
+    fn scan_step_log_requires_step_n() {
+        let argv = [
+            "megafine",
+            "-P",
+            "s",
+            "1",
+            "100",
+            "--parameter-step-log",
+            "a",
+        ];
+        assert!(Cli::try_parse_from(argv).is_err());
     }
 
     #[test]

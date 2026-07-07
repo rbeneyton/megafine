@@ -252,6 +252,35 @@ fn parameter_step_n_expands_commands() {
 }
 
 #[test]
+fn parameter_step_log_spaces_geometrically() {
+    let out = run(&[
+        "-P",
+        "s",
+        "1",
+        "1000",
+        "--parameter-step-n",
+        "3",
+        "--parameter-step-log",
+        "-r",
+        "1",
+        "--no-calibrate",
+        "--no-pin",
+        "/bin/true {s}",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("/bin/true 10"), "stdout: {s}");
+    assert!(s.contains("/bin/true 100"), "stdout: {s}");
+    assert!(s.contains("Benchmark 4"), "stdout: {s}");
+}
+
+#[test]
+fn parameter_step_log_requires_step_n() {
+    let out = run(&["-P", "s", "1", "100", "--parameter-step-log", "/bin/true"]);
+    assert!(!out.status.success());
+}
+
+#[test]
 fn parameter_step_n_conflicts_with_step_size() {
     let out = run(&[
         "-P",
