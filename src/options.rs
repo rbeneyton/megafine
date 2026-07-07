@@ -22,6 +22,8 @@ pub struct Options {
     pub target: Option<f64>,
     /// `None` runs commands directly; `Some(path)` runs them through that shell.
     pub shell: Option<String>,
+    /// Keep timing runs that exit non-zero as failed measurements.
+    pub ignore_failure: bool,
     pub setup: Option<Invocation>,
     pub prepare: Option<Invocation>,
     pub conclude: Option<Invocation>,
@@ -167,6 +169,7 @@ impl Options {
             runs: cli.runs,
             target: cli.target,
             shell,
+            ignore_failure: cli.ignore_failure,
             setup: None,
             prepare: None,
             conclude: None,
@@ -232,6 +235,12 @@ mod tests {
         assert_eq!(o.reference, 0);
         assert!(o.pin);
         assert!(!o.raw);
+    }
+
+    #[test]
+    fn ignore_failure_plumbs() {
+        assert!(!opts(&["a"]).unwrap().ignore_failure);
+        assert!(opts(&["-i", "a"]).unwrap().ignore_failure);
     }
 
     #[test]

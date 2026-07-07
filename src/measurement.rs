@@ -2,9 +2,9 @@ use crate::perf::PerfCounts;
 use crate::stats;
 use crate::stats::Estimator;
 
-/// The measured outcome of one successful command execution: its wall-clock
-/// time and the resource usage reported by `wait4`. Only successful runs are
-/// kept in a `BenchmarkResult` (a non-zero exit is surfaced as an error instead).
+/// The measured outcome of one command execution: its wall-clock time and the
+/// resource usage reported by `wait4`. A non-zero exit is surfaced as an error
+/// instead, unless --ignore-failure keeps it as a `failed` measurement.
 #[derive(Default)]
 pub struct Execution {
     /// Elapsed wall clock time, in seconds.
@@ -23,6 +23,8 @@ pub struct Execution {
     pub invol_ctx_switches: u64,
     /// Hardware counters, when --counters is on.
     pub counters: Option<PerfCounts>,
+    /// The command exited non-zero (kept only under --ignore-failure).
+    pub failed: bool,
 }
 
 /// All measurements collected for one benchmarked command.

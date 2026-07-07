@@ -36,17 +36,20 @@ impl Options {
     /// discarded; stderr is drained as it is produced (so it can never fill the
     /// pipe and block the child) and reported if the command exits non-zero.
     ///
-    /// With `region`, hand the child a pipe via `MEGAFINE_FD` and report the
-    /// wall-clock summed across its `megafine_start()`/`megafine_stop()` calls
-    /// instead of the whole-process elapsed time.
+    /// `measured` marks a timing run of a benchmarked command (as opposed to a
+    /// hook or calibration run): only those honor `--region` (pipe via
+    /// `MEGAFINE_FD`, wall-clock summed across `megafine_start()`/
+    /// `megafine_stop()` calls) and `--ignore-failure` (a non-zero exit is
+    /// kept as a failed measurement instead of surfacing as an error).
     ///
     /// `run_id`, when set, is exposed to the child as `MEGAFINE_RUN_ID`.
     pub fn execute(
         &self,
         inv: &Invocation,
-        region: bool,
+        measured: bool,
         run_id: Option<u64>,
     ) -> Result<Execution> {
+        let region = measured && self.region;
         let command_line = &inv.line;
         let mut command = Command::new(&inv.argv[0]);
         command
@@ -137,18 +140,23 @@ impl Options {
         exec.wall_clock = start.elapsed().as_secs_f64();
 
         if !status.success() {
-            let stderr = String::from_utf8_lossy(&captured);
-            let stderr = stderr.trim_end();
-            let mut message =
-                format!("command '{command_line}' terminated with a non-zero exit code ({status})");
-            if !stderr.is_empty() {
-                message.push_str(&format!("\n--- stderr ---\n{stderr}"));
+            if measured && self.ignore_failure {
+                exec.failed = true;
+            } else {
+                let stderr = String::from_utf8_lossy(&captured);
+                let stderr = stderr.trim_end();
+                let mut message = format!(
+                    "command '{command_line}' terminated with a non-zero exit code ({status})"
+                );
+                if !stderr.is_empty() {
+                    message.push_str(&format!("\n--- stderr ---\n{stderr}"));
+                }
+                // Shell convention for signal deaths: 128 + signal number.
+                let code = status
+                    .code()
+                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+                return Err(CommandFailed { code, message }.into());
             }
-            // Shell convention for signal deaths: 128 + signal number.
-            let code = status
-                .code()
-                .unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
-            return Err(CommandFailed { code, message }.into());
         }
 
         if let Some(counters) = counters {
@@ -302,6 +310,7 @@ fn wait4(child: &Child) -> Result<(ExitStatus, Execution)> {
             vol_ctx_switches: rusage.ru_nvcsw.max(0) as u64,
             invol_ctx_switches: rusage.ru_nivcsw.max(0) as u64,
             counters: None,
+            failed: false,
         },
     ))
 }

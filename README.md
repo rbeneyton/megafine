@@ -236,6 +236,7 @@ apply), or if `--no-calibrate` option is used.
 - [x] Add --counters option with perf data, and full rusage fields
 - [x] `-L NAME @FILE` to read parameter values from a file, one per line
 - [x] `--gen-completions SHELL` to print a shell completion script
+- [x] --ignore-failure to keep timing commands that exit non-zero
 
 ### [0.1.0] 2026-06-05
 

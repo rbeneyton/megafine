@@ -473,6 +473,53 @@ fn no_command_still_errors() {
 }
 
 #[test]
+fn ignore_failure_keeps_failing_runs() {
+    let out = run(&["-i", "-r", "3", "--no-calibrate", "--no-pin", "false"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("3 of 3 runs exited non-zero"), "stdout: {s}");
+    assert!(s.contains("3 runs"), "stdout: {s}");
+}
+
+#[test]
+fn ignore_failure_counts_mixed_runs() {
+    // Succeeds for run ids 0 and 1, fails on 2 and 3.
+    let out = run(&[
+        "-i",
+        "-j",
+        "1",
+        "-r",
+        "4",
+        "--no-calibrate",
+        "--no-pin",
+        "sh -c 'test $MEGAFINE_RUN_ID -lt 2'",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("2 of 4 runs exited non-zero"), "stdout: {s}");
+}
+
+#[test]
+fn ignore_failure_keeps_hooks_strict() {
+    let out = run(&[
+        "-i",
+        "-p",
+        "false",
+        "-r",
+        "1",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.01",
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("prepare command failed"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn failing_command_errors() {
     let out = run(&["-r", "1", "--no-calibrate", "--no-pin", "false"]);
     assert!(!out.status.success());

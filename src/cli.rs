@@ -57,6 +57,11 @@ pub struct Cli {
     #[arg(short = 'S', long, help_heading = "Execution")]
     pub shell: bool,
 
+    /// Keep timing runs that exit non-zero instead of aborting; their
+    /// measurements still count and megafine exits 0.
+    #[arg(short = 'i', long, help_heading = "Execution")]
+    pub ignore_failure: bool,
+
     /// Execute CMD once before the timing runs of each command.
     #[arg(short = 's', long, value_name = "CMD", help_heading = "Hooks")]
     pub setup: Option<String>,

@@ -199,6 +199,18 @@ fn print_results(results: &[BenchmarkResult], options: &Options) {
             format_count(center_of(result.times(|e| e.invol_ctx_switches as f64))).blue(),
         );
 
+        let failed = result.measurements.iter().filter(|e| e.failed).count();
+        if failed > 0 {
+            println!(
+                "  {}",
+                format!(
+                    "Warning: {failed} of {} runs exited non-zero",
+                    result.measurements.len()
+                )
+                .yellow()
+            );
+        }
+
         if result.measurements.iter().all(|e| e.counters.is_some()) {
             let counter = |get: fn(&perf::PerfCounts) -> u64| {
                 center_of(result.times(|e| get(e.counters.as_ref().unwrap()) as f64))

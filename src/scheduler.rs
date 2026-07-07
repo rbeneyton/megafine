@@ -133,7 +133,8 @@ struct CmdState {
 
 /// Run a single task on a worker: optional (unmeasured) prepare, then the
 /// measured command, then optional (unmeasured) conclude. A non-zero exit
-/// from any of them surfaces as an `Err`.
+/// from any of them surfaces as an `Err` (see `execute` for the
+/// --ignore-failure exception on the measured command).
 fn run_task(options: &Options, task: &Task) -> Result<Execution> {
     let run_id = (!task.calibration).then_some(task.run_id);
     if !task.calibration
@@ -143,7 +144,7 @@ fn run_task(options: &Options, task: &Task) -> Result<Execution> {
             .execute(prepare, false, run_id)
             .context("the prepare command failed")?;
     }
-    let execution = options.execute(&task.spec.inv, options.region, run_id)?;
+    let execution = options.execute(&task.spec.inv, !task.calibration, run_id)?;
     if !task.calibration
         && let Some(conclude) = &options.conclude
     {
