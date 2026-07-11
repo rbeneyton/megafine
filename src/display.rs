@@ -62,10 +62,36 @@ pub fn term_width() -> usize {
     term_size().1
 }
 
-/// Truncate to at most `cols - 1` characters so a line never fills the terminal
-/// width (which would wrap and corrupt the cursor math of the in-place redraw).
+/// Truncate to at most `cols - 1` visible characters so a line never fills the
+/// terminal width (which would wrap and corrupt the cursor math of the
+/// in-place redraw). ANSI escape sequences (the bold metric flag) take no
+/// columns, so they don't count; a reset is appended in case the truncation
+/// dropped the one closing the flag.
 fn fit(line: &str, cols: usize) -> String {
-    line.chars().take(cols.saturating_sub(1)).collect()
+    let budget = cols.saturating_sub(1);
+    let mut out = String::with_capacity(line.len());
+    let mut visible = 0;
+    let mut in_escape = false;
+    let mut had_escape = false;
+    for c in line.chars() {
+        if in_escape {
+            out.push(c);
+            in_escape = c != 'm';
+        } else if c == '\x1b' {
+            in_escape = true;
+            had_escape = true;
+            out.push(c);
+        } else if visible < budget {
+            out.push(c);
+            visible += 1;
+        } else {
+            break;
+        }
+    }
+    if had_escape {
+        out.push_str("\x1b[0m");
+    }
+    out
 }
 
 pub fn spawn_display(

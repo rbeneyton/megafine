@@ -1,4 +1,4 @@
-use crate::format::MetricKind;
+use crate::format::{MetricCell, MetricKind};
 use crate::perf::PerfCounts;
 use crate::stats;
 use crate::stats::Estimator;
@@ -92,6 +92,20 @@ impl Metric {
             Metric::Time | Metric::User | Metric::Sys => MetricKind::Time,
             Metric::Rss => MetricKind::Bytes,
             _ => MetricKind::Count,
+        }
+    }
+
+    /// The live-display cell that carries this metric (flagged in bold when it
+    /// is not the wall clock). Cycles has no perf cell (IPC is shown instead),
+    /// so it falls back to a section of its own like user, sys, faults and ctx.
+    pub fn live_cell(self) -> MetricCell {
+        match self {
+            Metric::Time => MetricCell::Time,
+            Metric::Rss => MetricCell::Peak,
+            Metric::Instructions => MetricCell::Instr,
+            Metric::CacheMisses => MetricCell::CacheMisses,
+            Metric::BranchMisses => MetricCell::BranchMisses,
+            _ => MetricCell::Own(self.kind(), self.name()),
         }
     }
 }

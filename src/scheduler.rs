@@ -13,7 +13,7 @@ use crate::format::{
     CounterRow, PerfCell, Relative, auto_unit, format_bytes, format_duration, format_time,
     render_counters,
 };
-use crate::measurement::{BenchmarkResult, Execution};
+use crate::measurement::{BenchmarkResult, Execution, Metric};
 use crate::options::{Invocation, Options};
 use crate::stats::Estimator;
 
@@ -238,12 +238,12 @@ fn publish_counters(
     counters: &mut Vec<f64>,
     display_tx: &Sender<DisplayMessage>,
 ) {
-    // (count, center, std) of one command's timed runs so far. `counters` is a
-    // reused buffer for the wall-clock times, sorted only when the estimator
-    // needs order.
-    let summary = |counters: &mut Vec<f64>, s: &CmdState| {
+    // (count, center, std) of one command's timed runs so far under `get`.
+    // `counters` is a reused buffer for the values, sorted only when the
+    // estimator needs order.
+    let summary = |counters: &mut Vec<f64>, s: &CmdState, get: &dyn Fn(&Execution) -> f64| {
         counters.clear();
-        counters.extend(s.measurements.iter().map(|x| options.metric.value(x)));
+        counters.extend(s.measurements.iter().map(get));
         if matches!(options.estimator, Estimator::Percentile(_)) {
             counters.sort_unstable_by(f64::total_cmp);
         }
@@ -254,13 +254,22 @@ fn publish_counters(
             std,
         )
     };
-    let (_, ref_center, ref_std) = summary(counters, &states[options.reference]);
+    let metric = &|e: &Execution| options.metric.value(e);
+    let (_, ref_center, ref_std) = summary(counters, &states[options.reference], metric);
 
     let rows: Vec<CounterRow> = states
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let (count, center, std) = summary(counters, s);
+            // The ranking (and its live ratio) follow the chosen metric; the
+            // center/σ cells always show the wall clock.
+            let (count, center, std) = summary(counters, s, metric);
+            let (time_center, time_std) = if options.metric == Metric::Time {
+                (center, std)
+            } else {
+                let (_, c, t) = summary(counters, s, &|e| e.wall_clock);
+                (c, t)
+            };
             // Live counterpart of the final ranking, against the reference's
             // current center; absent until both sides have a measurement.
             let relative = if states.len() < 2 {
@@ -300,8 +309,9 @@ fn publish_counters(
             CounterRow {
                 label: &s.spec.label,
                 count,
-                center,
-                std,
+                center: time_center,
+                std: time_std,
+                metric: (options.metric != Metric::Time && count > 0).then_some((center, std)),
                 peak_rss: s.max_rss,
                 perf,
                 relative,
@@ -313,7 +323,7 @@ fn publish_counters(
     let budget = term_width().saturating_sub(4);
     let mut lines = render_counters(
         &rows,
-        options.metric.kind(),
+        options.metric.live_cell(),
         options.time_unit,
         options.precision,
         budget,

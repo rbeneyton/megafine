@@ -182,6 +182,26 @@ pub struct PerfCell {
     pub branch_misses: f64,
 }
 
+/// Which live cell carries the ranking metric (--metric), so it can be
+/// flagged in bold when it is not the wall clock.
+#[derive(Clone, Copy, PartialEq)]
+pub enum MetricCell {
+    /// The metric is the wall clock itself: the time section, no flag.
+    Time,
+    /// No dedicated cell: an extra `center ± σ (name)` section after the
+    /// time one.
+    Own(MetricKind, &'static str),
+    /// The peak RSS cell.
+    Peak,
+    /// One of the perf-counter cells.
+    Instr,
+    CacheMisses,
+    BranchMisses,
+}
+
+const BOLD: &str = "\x1b[1m";
+const UNBOLD: &str = "\x1b[22m";
+
 /// One command's live progress, in raw values; rendered together with its peers.
 pub struct CounterRow<'a> {
     pub label: &'a str,
@@ -189,6 +209,9 @@ pub struct CounterRow<'a> {
     /// The estimator's central value (mean or percentile) of the times so far.
     pub center: f64,
     pub std: Option<f64>,
+    /// The ranking metric's central value and σ, when it is not the wall
+    /// clock (shown by `MetricCell::Own`, ignored by the other cells).
+    pub metric: Option<(f64, Option<f64>)>,
     pub peak_rss: u64,
     /// The perf-counter columns, when --counters is on.
     pub perf: Option<PerfCell>,
@@ -197,12 +220,13 @@ pub struct CounterRow<'a> {
 }
 
 /// Render all live counter lines as a column-aligned block. The center/σ
-/// columns show the selected metric (`kind`): time shares one unit —
-/// `forced_unit` (if set) or the lowest unit across the rows — and the peak
-/// RSS column shares the lowest unit across the rows.
+/// columns always show the wall clock and share one unit — `forced_unit` (if
+/// set) or the lowest unit across the rows — and the peak RSS column shares
+/// the lowest unit across the rows. The cell named by `metric_cell` (the
+/// ranking metric, when it is not the wall clock) is flagged in bold.
 pub fn render_counters(
     rows: &[CounterRow],
-    kind: MetricKind,
+    metric_cell: MetricCell,
     forced_unit: Option<TimeUnit>,
     precision: usize,
     budget: usize,
@@ -218,27 +242,59 @@ pub fn render_counters(
             .collect();
     }
 
-    // Center/σ cells are pre-rendered: their unit depends on the metric kind,
-    // and right-aligning the finished cells keeps the columns lined up (time
-    // rows share one unit, so their decimal points align too).
-    let unit = (kind == MetricKind::Time).then(|| {
-        forced_unit.unwrap_or_else(|| present.iter().map(|r| auto_unit(r.center)).min().unwrap())
-    });
-    let metric_cell = |v: f64| format_metric(v, kind, unit, precision);
+    // Center/σ cells are pre-rendered: right-aligning the finished cells keeps
+    // the columns lined up, and the shared unit aligns their decimal points.
+    let unit =
+        forced_unit.unwrap_or_else(|| present.iter().map(|r| auto_unit(r.center)).min().unwrap());
+    let time_cell = |v: f64| format_time(v, unit, precision);
     let center_cells: Vec<String> = rows
         .iter()
         .map(|r| {
             if r.count == 0 {
                 String::new()
             } else {
-                metric_cell(r.center)
+                time_cell(r.center)
             }
         })
         .collect();
     let std_cells: Vec<Option<String>> = rows
         .iter()
-        .map(|r| (r.count > 0).then(|| r.std.map(metric_cell)).flatten())
+        .map(|r| (r.count > 0).then(|| r.std.map(time_cell)).flatten())
         .collect();
+
+    // The ranking metric's own `center ± σ (name)` section, when it has no
+    // dedicated cell; time-kind metrics (user, sys) share one unit like the
+    // time column.
+    let (own_kind, own_name) = match metric_cell {
+        MetricCell::Own(kind, name) => (Some(kind), Some(name)),
+        _ => (None, None),
+    };
+    // Only meaningful for a time-kind section; the other kinds ignore it.
+    let m_unit = forced_unit.or_else(|| {
+        rows.iter()
+            .filter_map(|r| r.metric.map(|(center, _)| auto_unit(center)))
+            .min()
+    });
+    let m_cells: Vec<Option<(String, Option<String>)>> = rows
+        .iter()
+        .map(|r| match (own_kind, r.metric) {
+            (Some(kind), Some((center, std))) if r.count > 0 => Some((
+                format_metric(center, kind, m_unit, precision),
+                std.map(|v| format_metric(v, kind, m_unit, precision)),
+            )),
+            _ => None,
+        })
+        .collect();
+    let m_center_w = m_cells
+        .iter()
+        .flatten()
+        .map(|(c, _)| c.chars().count())
+        .max();
+    let m_std_w = m_cells
+        .iter()
+        .flatten()
+        .filter_map(|(_, s)| s.as_ref().map(|s| s.chars().count()))
+        .max();
 
     let rss_unit = present
         .iter()
@@ -318,6 +374,11 @@ pub fn render_counters(
     // within `budget`. The tail width is fixed once the columns above are known.
     let fixed_tail = 2 + count_w + 1 + 4 + 2 + center_w;
     let std_tail = std_w.map_or(0, |sw| 3 + sw);
+    let metric_tail = m_center_w.map_or(0, |mw| {
+        2 + mw
+            + m_std_w.map_or(0, |sw| 3 + sw)
+            + own_name.map_or(0, |n| 3 + n.chars().count())
+    });
     let peak_tail = match (rss_unit, rss_w) {
         (Some(u), Some(rw)) => 7 + rw + 1 + BYTE_UNITS[u].chars().count(),
         _ => 0,
@@ -335,13 +396,25 @@ pub fn render_counters(
         .max()
         .unwrap_or(0);
     let rel_tail = if rel_w > 0 { 2 + rel_w } else { 0 };
-    let label_w = label_w
-        .min(budget.saturating_sub(fixed_tail + std_tail + peak_tail + perf_tail + rel_tail));
+    let label_w = label_w.min(budget.saturating_sub(
+        fixed_tail + std_tail + metric_tail + peak_tail + perf_tail + rel_tail,
+    ));
+
+    // The bold flag never counts toward alignment: it wraps already-padded
+    // cells, so it adds zero visible columns.
+    let flag = |cell: String, on: bool| {
+        if on {
+            format!("{BOLD}{cell}{UNBOLD}")
+        } else {
+            cell
+        }
+    };
 
     rows.iter()
         .zip(&rel_cells)
+        .zip(&m_cells)
         .zip(center_cells.iter().zip(&std_cells))
-        .map(|((x, rel), (center, std_cell))| {
+        .map(|(((x, rel), m_cell), (center, std_cell))| {
             let label = truncate(x.label, label_w);
             if x.count == 0 {
                 return format!("{label:<label_w$}  pending");
@@ -359,24 +432,44 @@ pub fn render_counters(
                     None => line.push_str(&" ".repeat(3 + sw)),
                 }
             }
+            if let (Some(mw), Some((mc, ms))) = (m_center_w, m_cell) {
+                let mut cell = format!("{mc:>mw$}");
+                if let Some(sw) = m_std_w {
+                    match ms {
+                        Some(ms) => cell.push_str(&format!(" ± {ms:>sw$}")),
+                        None => cell.push_str(&" ".repeat(3 + sw)),
+                    }
+                }
+                if let Some(name) = own_name {
+                    cell.push_str(&format!(" ({name})"));
+                }
+                line.push_str(&format!("  {}", flag(cell, true)));
+            }
             if let (Some(u), Some(rw)) = (rss_unit, rss_w)
                 && x.peak_rss > 0
             {
-                line.push_str(&format!(
-                    "  peak {:>rw$} {}",
+                let cell = format!(
+                    "peak {:>rw$} {}",
                     format_byte_value(x.peak_rss, u),
                     BYTE_UNITS[u],
+                );
+                line.push_str(&format!(
+                    "  {}",
+                    flag(cell, metric_cell == MetricCell::Peak)
                 ));
             }
             if let (Some(p), Some(iw), Some(pw), Some(cw), Some(bw)) =
                 (&x.perf, instr_w, ipc_w, cache_w, branch_w)
             {
+                let instr = format!("{:>iw$} instr", format_count(p.instr));
+                let cache = format!("{:>cw$} cache-miss", format_count(p.cache_misses));
+                let branch = format!("{:>bw$} branch-miss", format_count(p.branch_misses));
                 line.push_str(&format!(
-                    "  {:>iw$} instr  IPC {:>pw$}  {:>cw$} cache-miss  {:>bw$} branch-miss",
-                    format_count(p.instr),
+                    "  {}  IPC {:>pw$}  {}  {}",
+                    flag(instr, metric_cell == MetricCell::Instr),
                     format!("{:.2}", p.ipc),
-                    format_count(p.cache_misses),
-                    format_count(p.branch_misses),
+                    flag(cache, metric_cell == MetricCell::CacheMisses),
+                    flag(branch, metric_cell == MetricCell::BranchMisses),
                 ));
             }
             if !rel.is_empty() {
@@ -475,6 +568,7 @@ mod tests {
             count,
             center,
             std,
+            metric: None,
             peak_rss: 0,
             perf: None,
             relative,
@@ -495,7 +589,7 @@ mod tests {
                 }),
             ),
         ];
-        let lines = render_counters(&rows, MetricKind::Time, None, 3, 200);
+        let lines = render_counters(&rows, MetricCell::Time, None, 3, 200);
         assert!(lines[0].ends_with("  reference"), "{}", lines[0]);
         assert!(lines[1].ends_with("  +10.44% (± 5.87)"), "{}", lines[1]);
     }
@@ -525,7 +619,7 @@ mod tests {
                 }),
             ),
         ];
-        let lines = render_counters(&rows, MetricKind::Time, None, 3, 200);
+        let lines = render_counters(&rows, MetricCell::Time, None, 3, 200);
         assert!(lines[1].ends_with("    +9.50%"), "{}", lines[1]);
         assert!(lines[2].ends_with("  +123.40% (± 12.30)"), "{}", lines[2]);
     }
@@ -533,7 +627,7 @@ mod tests {
     #[test]
     fn counters_without_relative_have_no_column() {
         let rows = [counter_row(2, 0.5, Some(0.1), None)];
-        let lines = render_counters(&rows, MetricKind::Time, None, 3, 200);
+        let lines = render_counters(&rows, MetricCell::Time, None, 3, 200);
         assert!(lines[0].ends_with("ms"), "{}", lines[0]);
     }
 
@@ -554,18 +648,57 @@ mod tests {
     }
 
     #[test]
-    fn counters_center_column_follows_kind() {
-        // A byte-kind metric renders center/σ as sizes, not durations.
-        let rows = [
-            counter_row(3, (2 << 20) as f64, Some((1 << 10) as f64), None),
-            counter_row(3, (4 << 20) as f64, Some((1 << 10) as f64), None),
-        ];
-        let lines = render_counters(&rows, MetricKind::Bytes, None, 3, 200);
-        assert!(lines[0].contains("MB"), "{}", lines[0]);
-        assert!(!lines[0].contains("ms"), "{}", lines[0]);
-        // A count-kind metric renders plain SI counts.
-        let rows = [counter_row(2, 12_345.0, None, None)];
-        let lines = render_counters(&rows, MetricKind::Count, None, 3, 200);
-        assert!(lines[0].contains("12.345 k"), "{}", lines[0]);
+    fn counters_center_column_is_always_time() {
+        // Whatever the ranking metric, center/σ stay wall-clock durations; a
+        // metric without a dedicated cell gets its own bold section after them.
+        let mut row = counter_row(2, 0.5, Some(0.1), None);
+        row.metric = Some((12_345.0, None));
+        let cell = MetricCell::Own(MetricKind::Count, "cycles");
+        let lines = render_counters(&[row], cell, None, 3, 200);
+        assert!(lines[0].contains("ms"), "{}", lines[0]);
+        assert!(
+            lines[0].contains(&format!("{BOLD}12.345 k (cycles){UNBOLD}")),
+            "{}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn counters_flag_the_metric_cell_in_bold() {
+        // --metric rss: the peak cell carries the ranking metric, in bold.
+        let mut row = counter_row(2, 0.5, Some(0.1), None);
+        row.metric = Some((7.0 * 1024.0 * 1024.0, None));
+        row.peak_rss = 7 << 20;
+        let lines = render_counters(&[row], MetricCell::Peak, None, 3, 200);
+        assert!(
+            lines[0].contains(&format!("{BOLD}peak 7.0 MB{UNBOLD}")),
+            "{}",
+            lines[0]
+        );
+        // --metric time: same row, no flag anywhere.
+        let mut row = counter_row(2, 0.5, Some(0.1), None);
+        row.peak_rss = 7 << 20;
+        let lines = render_counters(&[row], MetricCell::Time, None, 3, 200);
+        assert!(!lines[0].contains(BOLD), "{}", lines[0]);
+    }
+
+    #[test]
+    fn counters_flag_the_perf_cell_in_bold() {
+        let mut row = counter_row(2, 0.5, Some(0.1), None);
+        row.metric = Some((1e6, Some(2e3)));
+        row.perf = Some(PerfCell {
+            instr: 1e6,
+            ipc: 1.5,
+            cache_misses: 3e3,
+            branch_misses: 2e3,
+        });
+        let lines = render_counters(&[row], MetricCell::Instr, None, 3, 200);
+        assert!(
+            lines[0].contains(&format!("{BOLD}1.000 M instr{UNBOLD}")),
+            "{}",
+            lines[0]
+        );
+        // The other perf cells stay plain.
+        assert!(lines[0].contains("  IPC 1.50"), "{}", lines[0]);
     }
 }
