@@ -37,6 +37,64 @@ put `-n NAME...` after the `-` if you need):
 printf 'sleep %s\n' (seq 1 8) | megafine -j 2 -
 ```
 
+### Full usage
+
+```sh
+A multithreaded command-line benchmarking tool.
+
+Usage: megafine [OPTIONS] [command]...
+
+Arguments:
+  [command]...  The command(s) to benchmark, or `-` to read them from stdin (one per line)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+Output:
+  -n, --command-name <NAME>...  Display names for the commands, in order (one per command), should be last argument
+  -u, --time-unit <UNIT>        Display time unit: us, ms or s
+      --precision <DIGITS>      Digits after the decimal point for displayed times [default: 3]
+      --estimator <ESTIMATOR>   Central-value statistic for the metric and relative ratios: mean, median, or a percentile (p90, p999 = 99.9th) [default: mean]
+      --sort <ORDER>            Row order of the ranking table: command (input order) or metric (best first) [default: command]
+      --raw                     Print only the relative-speed ratios (one per line, command order, reference = first command or --reference) on stdout, for scripts
+      --reference <IDX>         Use the IDX-th command (1-based) as the relative-speed baseline [default: the first command]
+
+Execution:
+  -j, --jobs <JOBS>        Run JOBS command invocations simultaneously (0: auto) [default: available CPUs (16) minus --pin-reserved]
+  -w, --warmup <NUM>       Perform NUM warmup runs before the actual benchmark [default: 0]
+  -r, --runs <NUM>         Perform exactly NUM runs. If omitted, run until interrupted with Ctrl-C
+      --target <PCT>       Run each command until the 95% confidence interval of its mean is within ±PCT percent (10 runs minimum; --runs then acts as a cap). Needs the mean estimator
+  -S, --shell              Run commands through the current shell instead of direct execution
+  -i, --ignore-failure     Keep timing runs that exit non-zero instead of aborting; their measurements still count and megafine exits 0
+      --timeout <SECONDS>  Kill a timing run (whole process group) after SECONDS and treat it as a failed run (aborts the benchmark unless --ignore-failure)
+      --output <WHERE>     Where the benchmarked command's stdout goes: null, inherit (disables the live display), or a FILE truncated on every run [default: null]
+      --input <WHERE>      What the benchmarked command reads on stdin: null or a FILE [default: null]
+
+Hooks:
+  -s, --setup <CMD>     Execute CMD once before the timing runs of each command
+  -p, --prepare <CMD>   Execute CMD before each timing run
+      --conclude <CMD>  Execute CMD after each timing run
+  -c, --cleanup <CMD>   Execute CMD after all timing runs of each command
+
+Measurement:
+  -R, --region              Measure only the region the command brackets with megafine_start() and megafine_stop() (see instrument/megafine.[h|rs|py])
+  -m, --metric <METRIC>     The measured quantity all statistics (estimator, ranking, --target, significance verdict) are computed on: time (wall clock, or the region window with --region), user, sys, rss, major-faults, minor-faults,
+                            vol-ctx, invol-ctx, instructions, cycles, cache-misses or branch-misses (counter metrics imply --counters; all but time stay whole-process under --region) [default: time]
+      --counters            Also collect hardware counters per run via perf events (user space, whole child tree): instructions retired, CPU cycles, IPC, cache misses and branch misses
+      --no-calibrate        Skip the /bin/true calibration that establishes the measurement floor
+      --no-pin              Do not pin each concurrent job to its own CPU core(s). By default the allowed CPUs are partitioned across the jobs so they cannot contend
+      --pin-reserved <NUM>  Book NUM CPUs (lowest ids) for megafine's own threads [default: 0]
+
+Parameters:
+  -L, --parameter-list <NAME> <VALUES>     Benchmark each command once per VALUE, substituting it for `{NAME}` in the command (and -n names). VALUES is a comma-separated list, or @FILE to read one value per line. Repeatable; several lists
+                                           multiply
+  -P, --parameter-scan <NAME> <MIN> <MAX>  Benchmark each command once per value of NAME = MIN..=MAX (stepped by --parameter-step-size), substituting it for `{NAME}`
+      --parameter-step-size <STEP>         Step between two consecutive --parameter-scan values [default: 1]
+      --parameter-step-n <NUM>             Split each --parameter-scan MIN..=MAX into NUM equal steps (NUM+1 evenly spaced values, both endpoints included) instead of a fixed step size. Incompatible with --parameter-step-size
+      --parameter-step-log                 Space the --parameter-step-n steps geometrically (logarithmically) between MIN and MAX instead of linearly; MIN must be positive
+```
+
 ## Differences with hyperfine
 
 - -j support, with dedicated cpu affinity for workers
