@@ -224,15 +224,10 @@ pub fn render_counters(
     // Center/σ cells are pre-rendered: their unit depends on the metric kind,
     // and right-aligning the finished cells keeps the columns lined up (time
     // rows share one unit, so their decimal points align too).
-    let metric_cell: Box<dyn Fn(f64) -> String> = match kind {
-        MetricKind::Time => {
-            let unit = forced_unit
-                .unwrap_or_else(|| present.iter().map(|r| auto_unit(r.center)).min().unwrap());
-            Box::new(move |v| format_time(v, unit, precision))
-        }
-        MetricKind::Bytes => Box::new(|v| format_bytes(v as u64)),
-        MetricKind::Count => Box::new(format_count),
-    };
+    let unit = (kind == MetricKind::Time).then(|| {
+        forced_unit.unwrap_or_else(|| present.iter().map(|r| auto_unit(r.center)).min().unwrap())
+    });
+    let metric_cell = |v: f64| format_metric(v, kind, unit, precision);
     let center_cells: Vec<String> = rows
         .iter()
         .map(|r| {
@@ -245,7 +240,7 @@ pub fn render_counters(
         .collect();
     let std_cells: Vec<Option<String>> = rows
         .iter()
-        .map(|r| (r.count > 0).then(|| r.std.map(&metric_cell)).flatten())
+        .map(|r| (r.count > 0).then(|| r.std.map(metric_cell)).flatten())
         .collect();
 
     let rss_unit = present
