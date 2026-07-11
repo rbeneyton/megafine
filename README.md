@@ -272,6 +272,8 @@ apply), or if `--no-calibrate` option is used.
 
 ### [Unreleased]
 
+### [0.2.0] 2026-07-12
+
 - [x] Pin the main, display and Ctrl-C handler threads to the leftover CPUs.
 - [x] Add `--pin-reserved NUM` to book NUM CPUs for megafine's own threads when
   no leftover exists.
