@@ -44,16 +44,9 @@ fn apply(msg: DisplayMessage, worker_state: &mut [WorkerState], counter_msgs: &m
 /// Query the terminal size via the controlling tty as `(rows, cols)`,
 /// defaulting to 24x80.
 fn term_size() -> (usize, usize) {
-    unsafe {
-        let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut ws) == 0
-            && ws.ws_col > 0
-            && ws.ws_row > 0
-        {
-            (ws.ws_row as usize, ws.ws_col as usize)
-        } else {
-            (24, 80)
-        }
+    match rustix::termios::tcgetwinsize(stderr()) {
+        Ok(ws) if ws.ws_col > 0 && ws.ws_row > 0 => (ws.ws_row as usize, ws.ws_col as usize),
+        _ => (24, 80),
     }
 }
 

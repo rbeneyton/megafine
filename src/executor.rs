@@ -89,7 +89,7 @@ impl Options {
             .transpose()?;
         if let Some((reader, writer)) = &region_pipe {
             // Best-effort: events buffer until the run ends, so give the pipe room.
-            unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETPIPE_SZ, 1 << 20) };
+            let _ = rustix::pipe::fcntl_setpipe_size(reader, 1 << 20);
             let write_fd = writer.as_raw_fd();
             command.env("MEGAFINE_FD", write_fd.to_string());
             // Clear CLOEXEC on the write end *only* in this child, so it alone
@@ -134,11 +134,11 @@ impl Options {
         // failure the child is killed and reaped rather than run unmeasured.
         let counters = if self.counters {
             let attach = |pid: i32| -> std::io::Result<perf::Counters> {
-                let mut status = 0;
-                if unsafe { libc::waitpid(pid, &mut status, 0) } < 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if !libc::WIFSTOPPED(status) {
+                let status = rustix::process::waitpid(
+                    rustix::process::Pid::from_raw(pid),
+                    rustix::process::WaitOptions::empty(),
+                )?;
+                if !status.is_some_and(|(_, s)| s.stopped()) {
                     return Err(std::io::Error::other("child not stopped at exec"));
                 }
                 let counters = perf::attach(pid)?;
@@ -169,41 +169,45 @@ impl Options {
         let timed_out = Arc::new(AtomicBool::new(false));
         let killer = timeout
             .map(|limit| {
-                let pid = child.id() as i32;
-                let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as libc::c_int;
-                if pidfd < 0 {
-                    let e = std::io::Error::last_os_error();
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(anyhow::Error::new(e)
-                        .context(format!("pidfd_open failed for command '{command_line}'")));
-                }
+                let pid = rustix::process::Pid::from_child(&child);
+                let pidfd =
+                    match rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
+                        Ok(fd) => fd,
+                        Err(e) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Err(anyhow::Error::new(e).context(format!(
+                                "pidfd_open failed for command '{command_line}'"
+                            )));
+                        }
+                    };
                 let deadline = start + limit;
                 let flag = Arc::clone(&timed_out);
                 Ok(std::thread::spawn(move || {
-                    let mut fds = libc::pollfd {
-                        fd: pidfd,
-                        events: libc::POLLIN,
-                        revents: 0,
-                    };
+                    let mut fds = [rustix::event::PollFd::new(
+                        &pidfd,
+                        rustix::event::PollFlags::IN,
+                    )];
                     loop {
                         let remaining = deadline.saturating_duration_since(Instant::now());
-                        let ms = remaining.as_millis().min(i32::MAX as u128) as i32;
-                        match unsafe { libc::poll(&mut fds, 1, ms) } {
-                            0 => {
+                        let timeout = rustix::event::Timespec {
+                            tv_sec: remaining.as_secs().min(i64::MAX as u64) as i64,
+                            tv_nsec: remaining.subsec_nanos().into(),
+                        };
+                        match rustix::event::poll(&mut fds, Some(&timeout)) {
+                            Ok(0) => {
                                 flag.store(true, Ordering::Relaxed);
-                                unsafe { libc::kill(-pid, libc::SIGKILL) };
+                                let _ = rustix::process::kill_process_group(
+                                    pid,
+                                    rustix::process::Signal::KILL,
+                                );
                             }
-                            -1 if std::io::Error::last_os_error().kind()
-                                == std::io::ErrorKind::Interrupted =>
-                            {
-                                continue;
-                            }
+                            Err(rustix::io::Errno::INTR) => continue,
                             _ => {} // the child exited, nothing to kill
                         }
                         break;
                     }
-                    unsafe { libc::close(pidfd) };
+                    // pidfd is closed on drop
                 }))
             })
             .transpose()?;
@@ -273,13 +277,9 @@ impl Options {
 /// Partitioning *this* set (rather than every online CPU) makes pinning compose
 /// with an outer `taskset`/cpuset and skips offline cores.
 pub fn allowed_cpus() -> Result<Vec<usize>> {
-    let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::cpu_set_t>();
-    if unsafe { libc::sched_getaffinity(0, size, &mut set) } < 0 {
-        return Err(std::io::Error::last_os_error()).context("failed to read CPU affinity");
-    }
-    Ok((0..libc::CPU_SETSIZE as usize)
-        .filter(|&c| unsafe { libc::CPU_ISSET(c, &set) })
+    let set = rustix::thread::sched_getaffinity(None).context("failed to read CPU affinity")?;
+    Ok((0..rustix::thread::CpuSet::MAX_CPU)
+        .filter(|&c| set.is_set(c))
         .collect())
 }
 
@@ -300,15 +300,11 @@ pub fn partition(cpus: &[usize], jobs: usize, reserve: usize) -> (Vec<usize>, Ve
 }
 
 pub fn pin_thread(cpus: &[usize]) -> Result<()> {
-    let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+    let mut set = rustix::thread::CpuSet::new();
     for &c in cpus {
-        unsafe { libc::CPU_SET(c, &mut set) };
+        set.set(c);
     }
-    let size = std::mem::size_of::<libc::cpu_set_t>();
-    if unsafe { libc::sched_setaffinity(0, size, &set) } < 0 {
-        return Err(std::io::Error::last_os_error()).context("failed to set thread CPU affinity");
-    }
-    Ok(())
+    rustix::thread::sched_setaffinity(None, &set).context("failed to set thread CPU affinity")
 }
 
 /// Read all 9-byte `[tag:u8][ns:u64]` events from `reader` and return

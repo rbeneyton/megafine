@@ -321,6 +321,7 @@ dependencies = [
  "ctrlc",
  "flume",
  "libc",
+ "rustix",
  "shell-words",
  "tracing",
  "tracing-subscriber",
