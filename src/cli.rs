@@ -35,6 +35,14 @@ pub struct Cli {
     )]
     pub jobs: Option<usize>,
 
+    /// How runs are dispatched to the workers: saturate (keep every worker
+    /// busy), sequential (one run at a time, round-robin across commands;
+    /// implies --jobs 1), exclusive (a command never runs concurrently with
+    /// itself), or fair (lockstep rounds; every command keeps the same
+    /// number of runs) [default: saturate].
+    #[arg(long, value_name = "POLICY", help_heading = "Execution")]
+    pub schedule: Option<String>,
+
     /// Perform NUM warmup runs before the actual benchmark.
     #[arg(
         short,

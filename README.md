@@ -62,6 +62,8 @@ Output:
 
 Execution:
   -j, --jobs <JOBS>        Run JOBS command invocations simultaneously (0: auto) [default: available CPUs (16) minus --pin-reserved]
+      --schedule <POLICY>  How runs are dispatched to the workers: saturate (keep every worker busy), sequential (one run at a time, round-robin across commands; implies --jobs 1), exclusive (a command never runs concurrently with
+                           itself), or fair (lockstep rounds; every command keeps the same number of runs) [default: saturate]
   -w, --warmup <NUM>       Perform NUM warmup runs before the actual benchmark [default: 0]
   -r, --runs <NUM>         Perform exactly NUM runs. If omitted, run until interrupted with Ctrl-C
       --target <PCT>       Run each command until the 95% confidence interval of its mean is within ±PCT percent (10 runs minimum; --runs then acts as a cap). Needs the mean estimator
@@ -265,7 +267,6 @@ apply), or if `--no-calibrate` option is used.
 - [ ] multiple slots support in region mode, to allow multiple comparison
   inside same process or subtle timings 
 - [ ] pretty progress bars when -r is specified (low priority)
-- [ ] allow to force a pattern-defined scheduling (strict round robin per worker, …)
 
 ## Changelog
 
@@ -321,6 +322,8 @@ apply), or if `--no-calibrate` option is used.
   geometrically (log scale) between MIN and MAX; MIN must be positive
 - [x] Bare `-n` (no NAME) derives the display names automatically by removing
   the common prefix and suffix from the commands
+- [x] Add `--schedule saturate|sequential|exclusive|fair` to allow to control
+  scheduling
 
 ### [0.1.0] 2026-06-05
 

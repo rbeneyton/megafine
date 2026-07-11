@@ -14,7 +14,7 @@ use crate::format::{
     render_counters,
 };
 use crate::measurement::{BenchmarkResult, Execution, Metric};
-use crate::options::{Invocation, Options};
+use crate::options::{Invocation, Options, Schedule};
 use crate::stats::Estimator;
 
 /// Minimum delay between live counter updates sent to the display.
@@ -121,6 +121,8 @@ struct CmdState {
     /// --target precision).
     timed_remaining: Option<u64>,
     in_flight: u64,
+    /// Already dispatched in the current lockstep round (--schedule fair).
+    in_round: bool,
     measurements: Vec<Execution>,
     /// Running sum and sum of squares of the selected metric's values across
     /// `measurements`, for an O(1) mean and stddev (drives --target).
@@ -159,14 +161,21 @@ fn run_task(options: &Options, task: &Task) -> Result<Execution> {
 }
 
 /// Pick the next command to schedule, round-robin from `rr`. Warmup runs of a
-/// command are exhausted (and drained) before its timed runs start.
-fn pick(states: &[CmdState], rr: usize) -> Option<(usize, bool)> {
+/// command are exhausted (and drained) before its timed runs start. Exclusive
+/// skips commands that already have a run in flight; fair skips commands
+/// already dispatched in the current lockstep round.
+fn pick(states: &[CmdState], rr: usize, schedule: &Schedule) -> Option<(usize, bool)> {
     let n = states.len();
     for offset in 0..n {
         let i = (rr + offset) % n;
         let s = &states[i];
         if s.completed {
             continue;
+        }
+        match schedule {
+            Schedule::Exclusive if s.in_flight > 0 => continue,
+            Schedule::Fair if s.in_round => continue,
+            _ => {}
         }
         if s.warmup_remaining > 0 {
             return Some((i, true));
@@ -490,6 +499,7 @@ pub fn run_benchmarks(
                     warmup_in_flight: 0,
                     timed_remaining,
                     in_flight: 0,
+                    in_round: false,
                     measurements: Vec::new(),
                     sum: 0.0,
                     sum_sq: 0.0,
@@ -527,7 +537,21 @@ pub fn run_benchmarks(
                     return true;
                 }
                 while *in_flight_total < jobs {
-                    let Some((i, warmup)) = pick(states, *rr) else {
+                    let Some((i, warmup)) = pick(states, *rr, &options.schedule) else {
+                        // Fair: a round ends only once fully drained; open the
+                        // next one if any command still has runs to dispatch.
+                        if options.schedule == Schedule::Fair
+                            && *in_flight_total == 0
+                            && states.iter().any(|s| {
+                                !s.completed
+                                    && (s.warmup_remaining > 0 || s.timed_remaining != Some(0))
+                            })
+                        {
+                            for s in states.iter_mut() {
+                                s.in_round = false;
+                            }
+                            continue;
+                        }
                         break;
                     };
                     *rr = (i + 1) % states.len();
@@ -547,6 +571,7 @@ pub fn run_benchmarks(
                         s.timed_remaining = Some(r - 1);
                     }
                     s.in_flight += 1;
+                    s.in_round = true;
                     if job_tx.send(task).is_err() {
                         return false;
                     }
@@ -679,6 +704,20 @@ pub fn run_benchmarks(
             // the scope joins them when this closure returns.
             drop(job_tx);
 
+            // Fair keeps counts level while running, but an interrupt or abort
+            // mid-round may have recorded results for only some commands: trim
+            // every command down to the shortest.
+            if options.schedule == Schedule::Fair {
+                let min = states
+                    .iter()
+                    .map(|s| s.measurements.len())
+                    .min()
+                    .unwrap_or(0);
+                for s in &mut states {
+                    s.measurements.truncate(min);
+                }
+            }
+
             let mut results = Vec::with_capacity(states.len());
             for s in states {
                 if !s.measurements.is_empty() {
@@ -699,4 +738,58 @@ pub fn run_benchmarks(
 
     let _ = display.join();
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A CmdState mid-benchmark: warmups done, `timed` runs left to dispatch.
+    fn state(timed: Option<u64>) -> CmdState {
+        CmdState {
+            spec: Arc::new(CmdSpec {
+                label: Box::from("x"),
+                inv: Invocation {
+                    line: "x".into(),
+                    argv: vec!["x".into()],
+                },
+            }),
+            warmup_remaining: 0,
+            warmup_in_flight: 0,
+            timed_remaining: timed,
+            in_flight: 0,
+            in_round: false,
+            measurements: Vec::new(),
+            sum: 0.0,
+            sum_sq: 0.0,
+            time_sum: 0.0,
+            max_rss: 0,
+            last_update: Instant::now(),
+            completed: false,
+        }
+    }
+
+    #[test]
+    fn pick_exclusive_skips_in_flight_commands() {
+        let mut states = [state(Some(3)), state(Some(3))];
+        states[0].in_flight = 1;
+        assert_eq!(pick(&states, 0, &Schedule::Saturate), Some((0, false)));
+        assert_eq!(pick(&states, 0, &Schedule::Exclusive), Some((1, false)));
+        states[1].in_flight = 1;
+        assert_eq!(pick(&states, 0, &Schedule::Exclusive), None);
+    }
+
+    #[test]
+    fn pick_fair_dispatches_once_per_round() {
+        let mut states = [state(Some(3)), state(Some(3))];
+        states[0].in_round = true;
+        assert_eq!(pick(&states, 0, &Schedule::Fair), Some((1, false)));
+        states[1].in_round = true;
+        assert_eq!(pick(&states, 0, &Schedule::Fair), None);
+        // A cleared round makes every command eligible again.
+        for s in &mut states {
+            s.in_round = false;
+        }
+        assert_eq!(pick(&states, 1, &Schedule::Fair), Some((1, false)));
+    }
 }

@@ -30,6 +30,19 @@ pub enum Sort {
     Metric,
 }
 
+/// How runs are dispatched to the workers (--schedule). `sequential` has no
+/// variant: it is `Saturate` forced to a single job.
+#[derive(PartialEq)]
+pub enum Schedule {
+    /// Keep every worker busy: round-robin over the commands that have work.
+    Saturate,
+    /// At most one in-flight run per command at any time.
+    Exclusive,
+    /// Lockstep rounds: every command runs once per round, and a round fully
+    /// drains before the next starts, so run counts stay level.
+    Fair,
+}
+
 /// A command line pre-parsed into the argv it will be spawned with, so the
 /// parse happens once at startup (fail-fast) instead of on every run.
 pub struct Invocation {
@@ -40,6 +53,8 @@ pub struct Invocation {
 
 pub struct Options {
     pub jobs: usize,
+    /// How runs are dispatched to the workers.
+    pub schedule: Schedule,
     pub warmup: u64,
     pub runs: Option<u64>,
     /// Stop a command once the 95% CI half-width of its mean is below this
@@ -117,19 +132,34 @@ impl Options {
     }
 
     pub fn from_cli(cli: &Cli) -> Result<Self> {
-        let jobs = match cli.jobs {
-            None | Some(0) => {
-                let cores = all_cores();
-                if cores <= cli.pin_reserved {
-                    bail!(
-                        "--pin-reserved {} leaves no CPU for jobs ({cores} available); \
-                         reduce it or set --jobs explicitly",
-                        cli.pin_reserved
-                    );
-                }
-                cores - cli.pin_reserved
+        let schedule = match cli.schedule.as_deref() {
+            None | Some("saturate") | Some("sequential") => Schedule::Saturate,
+            Some("exclusive") => Schedule::Exclusive,
+            Some("fair") => Schedule::Fair,
+            Some(s) => {
+                bail!("invalid schedule '{s}' (use saturate, sequential, exclusive or fair)")
             }
-            Some(n) => n,
+        };
+        let jobs = if matches!(cli.schedule.as_deref(), Some("sequential")) {
+            if cli.jobs.is_some() {
+                bail!("--schedule sequential runs one task at a time (--jobs 1); drop --jobs");
+            }
+            1
+        } else {
+            match cli.jobs {
+                None | Some(0) => {
+                    let cores = all_cores();
+                    if cores <= cli.pin_reserved {
+                        bail!(
+                            "--pin-reserved {} leaves no CPU for jobs ({cores} available); \
+                             reduce it or set --jobs explicitly",
+                            cli.pin_reserved
+                        );
+                    }
+                    cores - cli.pin_reserved
+                }
+                Some(n) => n,
+            }
         };
 
         let shell = if cli.shell {
@@ -190,6 +220,12 @@ impl Options {
             }
             if estimator != Estimator::Mean {
                 bail!("--target needs the mean estimator (percentile CIs are not supported)");
+            }
+            if schedule == Schedule::Fair {
+                bail!(
+                    "--schedule fair keeps run counts equal, but --target stops each command \
+                     at its own count; they conflict"
+                );
             }
         }
 
@@ -259,6 +295,7 @@ impl Options {
 
         Ok(Options {
             jobs,
+            schedule,
             warmup: cli.warmup,
             runs: cli.runs.map(std::num::NonZeroU64::get),
             target: cli.target,
@@ -371,6 +408,28 @@ mod tests {
     #[test]
     fn explicit_jobs() {
         assert_eq!(opts(&["-j", "3", "a"]).unwrap().jobs, 3);
+    }
+
+    #[test]
+    fn schedule_parsing() {
+        assert!(opts(&["a"]).unwrap().schedule == Schedule::Saturate);
+        assert!(opts(&["--schedule", "exclusive", "a"]).unwrap().schedule == Schedule::Exclusive);
+        assert!(opts(&["--schedule", "fair", "a"]).unwrap().schedule == Schedule::Fair);
+        assert!(opts(&["--schedule", "bogus", "a"]).is_err());
+    }
+
+    #[test]
+    fn schedule_sequential_forces_one_job() {
+        let o = opts(&["--schedule", "sequential", "a"]).unwrap();
+        assert!(o.schedule == Schedule::Saturate);
+        assert_eq!(o.jobs, 1);
+        assert!(opts(&["--schedule", "sequential", "-j", "2", "a"]).is_err());
+    }
+
+    #[test]
+    fn schedule_fair_conflicts_with_target() {
+        assert!(opts(&["--schedule", "fair", "--target", "1", "a"]).is_err());
+        assert!(opts(&["--schedule", "fair", "-r", "3", "a"]).is_ok());
     }
 
     #[test]

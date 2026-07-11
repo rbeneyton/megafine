@@ -372,6 +372,92 @@ fn jobs_and_warmup_smoke() {
 }
 
 #[test]
+fn schedule_sequential_interleaves_commands() {
+    let log = RunLog::new("seq");
+    let a = format!("sh -c 'echo a >> {}'", log.0.display());
+    let b = format!("sh -c 'echo b >> {}'", log.0.display());
+    let out = run(&[
+        "--schedule",
+        "sequential",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        &a,
+        &b,
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    // One run at a time, strict round-robin across the commands.
+    assert_eq!(log.lines(), ["a", "b", "a", "b"]);
+}
+
+#[test]
+fn schedule_sequential_conflicts_with_jobs() {
+    let out = run(&["--schedule", "sequential", "-j", "2", "-r", "1", "a"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("drop --jobs"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn schedule_exclusive_serializes_each_command() {
+    // The command takes a mkdir mutex: a second concurrent instance of itself
+    // would fail the run. -j 2 would overlap without --schedule exclusive.
+    let lock = std::env::temp_dir().join(format!("megafine-excl-{}", std::process::id()));
+    let _ = std::fs::remove_dir(&lock);
+    let cmd = format!(
+        "sh -c 'mkdir {0} && sleep 0.02 && rmdir {0}'",
+        lock.display()
+    );
+    let out = run(&[
+        "--schedule",
+        "exclusive",
+        "-j",
+        "2",
+        "-r",
+        "4",
+        "--no-calibrate",
+        "--no-pin",
+        &cmd,
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+}
+
+#[test]
+fn schedule_fair_smoke() {
+    let out = run(&[
+        "--schedule",
+        "fair",
+        "-j",
+        "2",
+        "-w",
+        "1",
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.01",
+        "sleep 0.02",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(stdout(&out).contains("2 runs"), "stdout: {}", stdout(&out));
+}
+
+#[test]
+fn schedule_bogus_errors() {
+    let out = run(&["--schedule", "bogus", "-r", "1", "a"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("invalid schedule"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn region_mode_reports_a_benchmark() {
     // The region example brackets the middle sleep; region mode skips calibration.
     let region_bin = env!("CARGO_BIN_EXE_megafine-region-rs");
