@@ -6,7 +6,7 @@ use crate::stats::Estimator;
 /// The per-run quantity every statistic (--estimator, ranking, --target,
 /// t-test verdict, live display) is computed on (--metric). All variants are
 /// lower-is-better; derived quantities like IPC are excluded on purpose.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Metric {
     Time,
     User,

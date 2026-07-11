@@ -485,7 +485,7 @@ pub fn run_benchmarks(
 
             // {{{ setup step
             if let Some(setup) = &options.setup {
-                for _ in states.iter() {
+                for _ in 0..states.len() {
                     // no '?' operator here for unicity
                     if let Err(e) = options.execute(setup, false, None) {
                         aborted = true;

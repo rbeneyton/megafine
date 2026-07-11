@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use clap::Parser;
 
 #[derive(Parser)]
@@ -45,7 +47,7 @@ pub struct Cli {
 
     /// Perform exactly NUM runs. If omitted, run until interrupted with Ctrl-C.
     #[arg(short, long, value_name = "NUM", help_heading = "Execution")]
-    pub runs: Option<u64>,
+    pub runs: Option<NonZeroU64>,
 
     /// Run each command until the 95% confidence interval of its mean is
     /// within ±PCT percent (10 runs minimum; --runs then acts as a cap).

@@ -7,10 +7,9 @@ pub fn max(values: &[f64]) -> f64 {
 }
 
 pub fn mean(values: &[f64]) -> f64 {
-    let r = values.iter().fold(0.0, |acc, x| acc + x);
     match values.len() {
         0 => 0.,
-        n => r / n as f64,
+        n => values.iter().sum::<f64>() / n as f64,
     }
 }
 
@@ -29,7 +28,7 @@ pub fn percentile(sorted: &[f64], p: f64) -> f64 {
 }
 
 /// The statistic reported as a command's central time (`--estimator`).
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Estimator {
     Mean,
     /// Percentile in [0, 100]; the median is `Percentile(50.0)`.
@@ -226,14 +225,19 @@ mod tests {
 
     #[test]
     fn estimator_parse() {
-        // Estimator has no Debug, so compare with `==` rather than assert_eq!.
-        assert!(Estimator::parse("mean") == Some(Estimator::Mean));
-        assert!(Estimator::parse("median") == Some(Estimator::Percentile(50.0)));
-        assert!(Estimator::parse("p0") == Some(Estimator::Percentile(0.0)));
-        assert!(Estimator::parse("p90") == Some(Estimator::Percentile(90.0)));
-        assert!(Estimator::parse("p100") == Some(Estimator::Percentile(100.0)));
-        assert!(Estimator::parse("p999") == Some(Estimator::Percentile(99.9)));
-        assert!(Estimator::parse("p9995") == Some(Estimator::Percentile(99.95)));
+        assert_eq!(Estimator::parse("mean"), Some(Estimator::Mean));
+        assert_eq!(
+            Estimator::parse("median"),
+            Some(Estimator::Percentile(50.0))
+        );
+        assert_eq!(Estimator::parse("p0"), Some(Estimator::Percentile(0.0)));
+        assert_eq!(Estimator::parse("p90"), Some(Estimator::Percentile(90.0)));
+        assert_eq!(Estimator::parse("p100"), Some(Estimator::Percentile(100.0)));
+        assert_eq!(Estimator::parse("p999"), Some(Estimator::Percentile(99.9)));
+        assert_eq!(
+            Estimator::parse("p9995"),
+            Some(Estimator::Percentile(99.95))
+        );
         assert!(Estimator::parse("p").is_none());
         assert!(Estimator::parse("p12.5").is_none());
         assert!(Estimator::parse("avg").is_none());

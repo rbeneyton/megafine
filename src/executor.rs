@@ -371,11 +371,10 @@ fn wait4(child: &Child) -> Result<(ExitStatus, Execution)> {
     let mut rusage = MaybeUninit::zeroed();
 
     let result = unsafe { libc::wait4(pid, &mut status, 0, rusage.as_mut_ptr()) };
-    let err = std::io::Error::last_os_error();
-    let errno = err.raw_os_error().unwrap_or(-1);
-    (result >= 0).then_some(()).ok_or(err).with_context(|| {
-        format!("wait4(2) on pid {pid} failed: returned {result}, errno {errno}")
-    })?;
+    if result < 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("wait4(2) on pid {pid} failed"));
+    }
 
     let rusage = unsafe { rusage.assume_init() };
     Ok((

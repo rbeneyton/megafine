@@ -18,6 +18,7 @@ pub enum DisplayMessage {
 }
 
 /// What a worker line is showing.
+#[derive(Clone, Copy)]
 enum WorkerState {
     Idle,
     Running(usize),
@@ -85,7 +86,7 @@ pub fn spawn_display(
         // What each worker is showing. Running holds the command index; the
         // label is looked up in `command_labels` at draw time, so nothing is
         // allocated per task start and it still reflows on resize.
-        let mut worker_state: Vec<WorkerState> = (0..jobs).map(|_| WorkerState::Idle).collect();
+        let mut worker_state = vec![WorkerState::Idle; jobs];
         let mut counter_msgs: Vec<String> = command_labels
             .iter()
             .map(|label| format!("{label}: pending"))

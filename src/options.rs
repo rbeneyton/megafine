@@ -184,10 +184,6 @@ impl Options {
             .transpose()?
             .unwrap_or(Metric::Time);
 
-        if let Some(0) = cli.runs {
-            bail!("--runs must be at least 1");
-        }
-
         if let Some(t) = cli.target {
             if t <= 0.0 {
                 bail!("--target must be positive");
@@ -263,7 +259,7 @@ impl Options {
         Ok(Options {
             jobs,
             warmup: cli.warmup,
-            runs: cli.runs,
+            runs: cli.runs.map(std::num::NonZeroU64::get),
             target: cli.target,
             shell,
             ignore_failure: cli.ignore_failure,
@@ -387,7 +383,8 @@ mod tests {
 
     #[test]
     fn runs_zero_rejected() {
-        assert!(opts(&["-r", "0", "a"]).is_err());
+        // Enforced by clap (NonZeroU64), so parsing itself fails.
+        assert!(Cli::try_parse_from(["megafine", "-r", "0", "a"]).is_err());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TimeUnit {
     Microsecond,
     Millisecond,
@@ -35,7 +35,7 @@ impl TimeUnit {
 }
 
 /// How a metric's values are formatted: durations, byte sizes or plain counts.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MetricKind {
     Time,
     Bytes,
@@ -76,13 +76,10 @@ const BYTE_UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
 
 /// Index into `BYTE_UNITS` of the largest binary unit not exceeding `bytes`.
 fn byte_unit(bytes: u64) -> usize {
-    let mut unit = 0;
-    let mut limit = 1u64 << 10;
-    while bytes >= limit && unit < BYTE_UNITS.len() - 1 {
-        limit <<= 10;
-        unit += 1;
+    match bytes {
+        0 => 0,
+        b => ((b.ilog2() / 10) as usize).min(BYTE_UNITS.len() - 1),
     }
-    unit
 }
 
 /// Just the numeric part of a byte count in `BYTE_UNITS[unit]` (no suffix).
@@ -396,19 +393,18 @@ mod tests {
 
     #[test]
     fn parse_time_unit() {
-        // TimeUnit has no Debug, so compare with `==` rather than assert_eq!.
-        assert!(TimeUnit::parse("us") == Some(TimeUnit::Microsecond));
-        assert!(TimeUnit::parse("µs") == Some(TimeUnit::Microsecond));
-        assert!(TimeUnit::parse("ms") == Some(TimeUnit::Millisecond));
-        assert!(TimeUnit::parse("second") == Some(TimeUnit::Second));
+        assert_eq!(TimeUnit::parse("us"), Some(TimeUnit::Microsecond));
+        assert_eq!(TimeUnit::parse("µs"), Some(TimeUnit::Microsecond));
+        assert_eq!(TimeUnit::parse("ms"), Some(TimeUnit::Millisecond));
+        assert_eq!(TimeUnit::parse("second"), Some(TimeUnit::Second));
         assert!(TimeUnit::parse("ns").is_none());
     }
 
     #[test]
     fn auto_unit_boundaries() {
-        assert!(auto_unit(1e-4) == TimeUnit::Microsecond);
-        assert!(auto_unit(0.5) == TimeUnit::Millisecond);
-        assert!(auto_unit(5.0) == TimeUnit::Second);
+        assert_eq!(auto_unit(1e-4), TimeUnit::Microsecond);
+        assert_eq!(auto_unit(0.5), TimeUnit::Millisecond);
+        assert_eq!(auto_unit(5.0), TimeUnit::Second);
     }
 
     #[test]
