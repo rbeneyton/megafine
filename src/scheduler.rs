@@ -359,6 +359,17 @@ pub fn run_benchmarks(
     // each other's timings. Empty when pinning is off; indexed by worker id.
     let groups = if options.pin {
         let cpus = allowed_cpus()?;
+        // all_cores() additionally caps at the cgroup CPU quota, so reporting
+        // less than the affinity mask means a bandwidth quota is throttling us
+        // in time, not in cores — something pinning cannot isolate against.
+        let quota = crate::options::all_cores();
+        if quota < cpus.len() {
+            warn!(
+                quota,
+                allowed = cpus.len(),
+                "a cgroup CPU quota is active; pinning cannot isolate workers from quota throttling"
+            );
+        }
         if jobs > cpus.len().saturating_sub(options.pin_reserved) {
             bail!(
                 "cannot pin {jobs} jobs to {} available CPU(s) ({} allowed, {} reserved); \
