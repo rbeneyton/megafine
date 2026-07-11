@@ -230,6 +230,49 @@ fn parameter_list_reads_values_from_file() {
 }
 
 #[test]
+fn parameter_step_n_expands_commands() {
+    // step = (3-1)/2 = 1 → values 1, 2, 3.
+    let out = run(&[
+        "-P",
+        "s",
+        "1",
+        "3",
+        "--parameter-step-n",
+        "2",
+        "-r",
+        "1",
+        "--no-calibrate",
+        "--no-pin",
+        "/bin/true {s}",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("/bin/true 2"), "stdout: {s}");
+    assert!(s.contains("Benchmark 3"), "stdout: {s}");
+}
+
+#[test]
+fn parameter_step_n_conflicts_with_step_size() {
+    let out = run(&[
+        "-P",
+        "s",
+        "1",
+        "3",
+        "--parameter-step-n",
+        "2",
+        "--parameter-step-size",
+        "1",
+        "/bin/true",
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("cannot be used with"),
+        "stderr: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn unknown_parameter_errors() {
     let out = run(&["-L", "d", "1", "-r", "1", "--no-calibrate", "sleep {x}"]);
     assert!(!out.status.success());

@@ -246,6 +246,9 @@ apply), or if `--no-calibrate` option is used.
   --show-output)
 - [x] `--sort command|metric` to order the ranking table
 - [x] `--metric time|user|sys|rss|…|instructions|cycles|cache-misses|branch-misses`
+- [x] `--parameter-step-n NUM` to split a `--parameter-scan` range into NUM
+  equal steps (NUM+1 values) instead of a fixed step size; incompatible with
+  `--parameter-step-size`
 
 ### [0.1.0] 2026-06-05
 

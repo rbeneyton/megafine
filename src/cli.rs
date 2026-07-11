@@ -150,6 +150,17 @@ pub struct Cli {
     )]
     pub parameter_step_size: f64,
 
+    /// Split each --parameter-scan MIN..=MAX into NUM equal steps (NUM+1
+    /// evenly spaced values, both endpoints included) instead of a fixed
+    /// step size. Incompatible with --parameter-step-size.
+    #[arg(
+        long,
+        value_name = "NUM",
+        conflicts_with = "parameter_step_size",
+        help_heading = "Parameters"
+    )]
+    pub parameter_step_n: Option<usize>,
+
     /// Display names for the commands, in order (one per command), should be last argument.
     #[arg(short = 'n', long = "command-name", value_name = "NAME", num_args = 1.., help_heading = "Output")]
     pub command_name: Vec<String>,

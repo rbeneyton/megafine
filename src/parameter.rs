@@ -18,6 +18,23 @@ fn decimals(s: &str) -> usize {
     s.split_once('.').map_or(0, |(_, frac)| frac.len())
 }
 
+/// Fewest decimals (at least `floor`, capped) that render every `--parameter-step-n`
+/// value back to itself: a computed step like 0.25 needs 2 decimals to stay exact,
+/// while a non-terminating one (1/3) rounds at the cap and passes the rounded value.
+fn scan_decimals(values: &[f64], floor: usize) -> usize {
+    const CAP: usize = 6;
+    for d in floor..CAP {
+        let faithful = values.iter().all(|&v| {
+            let parsed: f64 = format!("{v:.d$}").parse().unwrap();
+            (parsed - v).abs() <= v.abs().max(1.0) * 1e-9
+        });
+        if faithful {
+            return d;
+        }
+    }
+    CAP
+}
+
 /// Collect the -L/-P axes (clap guarantees the pair/triple grouping).
 fn axes(cli: &Cli) -> Result<Vec<Axis>> {
     let mut axes = Vec::new();
@@ -61,26 +78,53 @@ fn axes(cli: &Cli) -> Result<Vec<Axis>> {
                 .with_context(|| format!("--parameter-scan {}: '{s}' is not a number", triple[0]))
         };
         let (min, max) = (parse(&triple[1])?, parse(&triple[2])?);
-        let step = cli.parameter_step_size;
-        if step <= 0.0 {
-            bail!("--parameter-step-size must be positive");
-        }
         if min > max {
             bail!("--parameter-scan {}: MIN {min} > MAX {max}", triple[0]);
         }
-        let d = decimals(&triple[1])
-            .max(decimals(&triple[2]))
-            .max(decimals(&step.to_string()));
-        let mut values = Vec::new();
-        let mut v = min;
-        // Absorb the accumulated float error so MAX itself is included.
-        while v <= max + step * 1e-9 {
-            values.push(format!("{v:.d$}"));
-            v += step;
-            if values.len() > MAX_COMMANDS {
-                bail!("--parameter-scan {} yields too many values", triple[0]);
+        // The bounds' own decimals are the floor for the generated labels.
+        let bound_d = decimals(&triple[1]).max(decimals(&triple[2]));
+        let values = match cli.parameter_step_n {
+            // NUM equal steps: NUM+1 evenly spaced values, endpoints exact.
+            Some(n) => {
+                if n == 0 {
+                    bail!("--parameter-step-n must be at least 1");
+                }
+                if min >= max {
+                    bail!(
+                        "--parameter-scan {}: MIN must be below MAX with --parameter-step-n",
+                        triple[0]
+                    );
+                }
+                if n + 1 > MAX_COMMANDS {
+                    bail!("--parameter-scan {} yields too many values", triple[0]);
+                }
+                let step = (max - min) / n as f64;
+                let points: Vec<f64> = (0..=n)
+                    .map(|i| if i == n { max } else { min + i as f64 * step })
+                    .collect();
+                let d = scan_decimals(&points, bound_d);
+                points.iter().map(|v| format!("{v:.d$}")).collect()
             }
-        }
+            // Fixed step size (default 1.0).
+            None => {
+                let step = cli.parameter_step_size;
+                if step <= 0.0 {
+                    bail!("--parameter-step-size must be positive");
+                }
+                let d = bound_d.max(decimals(&step.to_string()));
+                let mut values = Vec::new();
+                let mut v = min;
+                // Absorb the accumulated float error so MAX itself is included.
+                while v <= max + step * 1e-9 {
+                    values.push(format!("{v:.d$}"));
+                    v += step;
+                    if values.len() > MAX_COMMANDS {
+                        bail!("--parameter-scan {} yields too many values", triple[0]);
+                    }
+                }
+                values
+            }
+        };
         axes.push(Axis {
             name: triple[0].clone(),
             values,
@@ -233,6 +277,69 @@ mod tests {
         let result = expand(&cli(&["-L", "a", &arg, "a"]));
         std::fs::remove_file(&path).unwrap();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn scan_step_n_integer() {
+        let c = cli(&["-P", "s", "3", "10", "--parameter-step-n", "7", "echo {s}"]);
+        let (cmds, _) = expand(&c).unwrap();
+        assert_eq!(
+            cmds,
+            [
+                "echo 3", "echo 4", "echo 5", "echo 6", "echo 7", "echo 8", "echo 9", "echo 10"
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_step_n_fractional_keeps_exact_values() {
+        // step = 0.25, so labels need two decimals to stay faithful.
+        let c = cli(&["-P", "d", "0", "1", "--parameter-step-n", "4", "echo {d}"]);
+        let (cmds, _) = expand(&c).unwrap();
+        assert_eq!(
+            cmds,
+            [
+                "echo 0.00",
+                "echo 0.25",
+                "echo 0.50",
+                "echo 0.75",
+                "echo 1.00"
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_step_n_endpoints_are_exact() {
+        // A non-dividing range still starts at MIN and ends at MAX exactly.
+        let c = cli(&["-P", "n", "1", "10", "--parameter-step-n", "3", "echo {n}"]);
+        let (cmds, _) = expand(&c).unwrap();
+        assert_eq!(cmds.first().unwrap(), "echo 1");
+        assert_eq!(cmds.last().unwrap(), "echo 10");
+        assert_eq!(cmds.len(), 4);
+    }
+
+    #[test]
+    fn scan_step_n_errors() {
+        assert!(expand(&cli(&["-P", "n", "1", "3", "--parameter-step-n", "0", "a"])).is_err());
+        // MIN == MAX has no steps to divide.
+        assert!(expand(&cli(&["-P", "n", "5", "5", "--parameter-step-n", "2", "a"])).is_err());
+    }
+
+    #[test]
+    fn scan_step_n_conflicts_with_step_size() {
+        let argv = [
+            "megafine",
+            "-P",
+            "n",
+            "1",
+            "3",
+            "--parameter-step-n",
+            "2",
+            "--parameter-step-size",
+            "1",
+            "a",
+        ];
+        assert!(Cli::try_parse_from(argv).is_err());
     }
 
     #[test]
