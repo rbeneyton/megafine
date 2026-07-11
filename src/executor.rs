@@ -1,7 +1,7 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{PipeReader, Read};
 use std::mem::MaybeUninit;
-use std::os::fd::FromRawFd;
+use std::os::fd::AsRawFd;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
 use std::sync::Arc;
@@ -85,9 +85,12 @@ impl Options {
 
         // Both ends close-on-exec; we re-open the write end in the child below.
         let region_pipe = region
-            .then(|| pipe_cloexec().context("cannot create a pipe for region mode data exchange"))
+            .then(|| std::io::pipe().context("cannot create a pipe for region mode data exchange"))
             .transpose()?;
-        if let Some((_, write_fd)) = region_pipe {
+        if let Some((reader, writer)) = &region_pipe {
+            // Best-effort: events buffer until the run ends, so give the pipe room.
+            unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETPIPE_SZ, 1 << 20) };
+            let write_fd = writer.as_raw_fd();
             command.env("MEGAFINE_FD", write_fd.to_string());
             // Clear CLOEXEC on the write end *only* in this child, so it alone
             // keeps the write side past exec (children forked concurrently by
@@ -130,9 +133,7 @@ impl Options {
             .spawn()
             .with_context(|| format!("failed to spawn command '{command_line}'"))?;
         // Drop the parent's write end so the read side EOFs at child exit.
-        if let Some((_, write_fd)) = region_pipe {
-            unsafe { libc::close(write_fd) };
-        }
+        let region_reader = region_pipe.map(|(reader, _writer)| reader);
         // Attach to the exec-stopped child, then release it. The freeze is
         // constant overhead on the wall clock, absorbed by calibration. On
         // failure the child is killed and reaped rather than run unmeasured.
@@ -216,7 +217,7 @@ impl Options {
         // stderr (≈ its exit), so wait4 then reaps immediately.
         let captured = child.stderr.take().map(drain_capped).unwrap_or_default();
         // Region events buffered while stderr drained; collect them now.
-        let region_window = region_pipe.map(|(read_fd, _)| read_region_window(read_fd));
+        let region_window = region_reader.map(read_region_window);
         let (status, mut exec) = wait4(&child)
             .with_context(|| format!("failed to wait for command '{command_line}'"))?;
         exec.wall_clock = start.elapsed().as_secs_f64();
@@ -315,27 +316,12 @@ pub fn pin_thread(cpus: &[usize]) -> Result<()> {
     Ok(())
 }
 
-/// Create a pipe with both ends close-on-exec, enlarged for region-event headroom.
-/// Returns `(read_fd, write_fd)`.
-fn pipe_cloexec() -> Result<(i32, i32)> {
-    let mut fds = [0i32; 2];
-    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } < 0 {
-        return Err(std::io::Error::last_os_error()).context("failed to create region pipe");
-    }
-    // Best-effort: events buffer until the run ends, so give the pipe room.
-    unsafe { libc::fcntl(fds[0], libc::F_SETPIPE_SZ, 1 << 20) };
-    Ok((fds[0], fds[1]))
-}
-
-/// Read all 9-byte `[tag:u8][ns:u64]` events from `read_fd` (closing it) and return
+/// Read all 9-byte `[tag:u8][ns:u64]` events from `reader` and return
 /// the summed `stop - start` window in seconds, or `None` if no complete pair.
 /// TODO: add sub identifier to allow multiple slots
-fn read_region_window(read_fd: i32) -> Option<f64> {
+fn read_region_window(mut reader: PipeReader) -> Option<f64> {
     let mut bytes = Vec::new();
-    // SAFETY: we own `read_fd`; File closes it on drop.
-    unsafe { File::from_raw_fd(read_fd) }
-        .read_to_end(&mut bytes)
-        .ok()?;
+    reader.read_to_end(&mut bytes).ok()?;
 
     let mut pending: Option<u64> = None;
     let mut total_ns: u64 = 0;
