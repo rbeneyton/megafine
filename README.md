@@ -95,6 +95,16 @@ Parameters:
       --parameter-step-log                 Space the --parameter-step-n steps geometrically (logarithmically) between MIN and MAX instead of linearly; MIN must be positive
 ```
 
+### Runtime schema
+
+```plain
+start ─┬─▶ /bin/true  ─┬─▶ setup ─┬─▶ prepare ──▶ command ──▶ conclude ─┬─▶ cleanup ──▶ report
+       │               │          │                                     │
+       ├─▶ ·········· ─┤          ├─▶ ································ ─┤
+       │ (calibration) │          │    (1..jobs concurrent workers)     │
+       └─▶ ·········  ─┘          └─▶ ································ ─┘
+```
+
 ## Differences with hyperfine
 
 - -j support, with dedicated cpu affinity for workers
