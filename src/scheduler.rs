@@ -268,12 +268,9 @@ fn publish_counters(
             } else if i == options.reference {
                 Some(Relative::Reference)
             } else if count > 0 && ref_center > 0.0 {
-                let stddev = match (std, ref_std) {
-                    (Some(std), Some(ref_std)) => {
-                        Some(crate::stats::ratio_stddev(center, std, ref_center, ref_std))
-                    }
-                    _ => None,
-                };
+                let stddev = std.zip(ref_std).map(|(std, ref_std)| {
+                    crate::stats::ratio_stddev(center, std, ref_center, ref_std)
+                });
                 Some(Relative::Ratio {
                     ratio: center / ref_center,
                     stddev,

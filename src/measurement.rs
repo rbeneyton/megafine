@@ -174,12 +174,9 @@ pub fn compute(
         .enumerate()
         .map(|(idx, (result, &(center, stddev)))| {
             let ratio = center / ref_center;
-            let stddev = match (stddev, ref_stddev) {
-                (Some(stddev), Some(ref_stddev)) => {
-                    Some(stats::ratio_stddev(center, stddev, ref_center, ref_stddev))
-                }
-                _ => None,
-            };
+            let stddev = stddev.zip(ref_stddev).map(|(stddev, ref_stddev)| {
+                stats::ratio_stddev(center, stddev, ref_center, ref_stddev)
+            });
             NormBenchmark {
                 result,
                 center,
