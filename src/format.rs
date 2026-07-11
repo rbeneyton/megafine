@@ -375,9 +375,7 @@ pub fn render_counters(
     let fixed_tail = 2 + count_w + 1 + 4 + 2 + center_w;
     let std_tail = std_w.map_or(0, |sw| 3 + sw);
     let metric_tail = m_center_w.map_or(0, |mw| {
-        2 + mw
-            + m_std_w.map_or(0, |sw| 3 + sw)
-            + own_name.map_or(0, |n| 3 + n.chars().count())
+        2 + mw + m_std_w.map_or(0, |sw| 3 + sw) + own_name.map_or(0, |n| 3 + n.chars().count())
     });
     let peak_tail = match (rss_unit, rss_w) {
         (Some(u), Some(rw)) => 7 + rw + 1 + BYTE_UNITS[u].chars().count(),
@@ -396,9 +394,10 @@ pub fn render_counters(
         .max()
         .unwrap_or(0);
     let rel_tail = if rel_w > 0 { 2 + rel_w } else { 0 };
-    let label_w = label_w.min(budget.saturating_sub(
-        fixed_tail + std_tail + metric_tail + peak_tail + perf_tail + rel_tail,
-    ));
+    let label_w = label_w
+        .min(budget.saturating_sub(
+            fixed_tail + std_tail + metric_tail + peak_tail + perf_tail + rel_tail,
+        ));
 
     // The bold flag never counts toward alignment: it wraps already-padded
     // cells, so it adds zero visible columns.

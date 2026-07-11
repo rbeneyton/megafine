@@ -151,6 +151,8 @@ pub struct NormBenchmark<'a> {
     pub result: &'a BenchmarkResult,
     /// The estimator's central value (mean or percentile) of the metric.
     pub center: f64,
+    /// Sample stddev of the metric's values (`None` for fewer than two runs).
+    pub spread: Option<f64>,
     /// `center / reference_center` (the first command's center).
     pub ratio: f64,
     /// Propagated uncertainty on `ratio`, if both stddevs are known.
@@ -188,14 +190,15 @@ pub fn compute(
         .enumerate()
         .map(|(idx, (result, &(center, stddev)))| {
             let ratio = center / ref_center;
-            let stddev = stddev.zip(ref_stddev).map(|(stddev, ref_stddev)| {
+            let ratio_stddev = stddev.zip(ref_stddev).map(|(stddev, ref_stddev)| {
                 stats::ratio_stddev(center, stddev, ref_center, ref_stddev)
             });
             NormBenchmark {
                 result,
                 center,
+                spread: stddev,
                 ratio,
-                stddev,
+                stddev: ratio_stddev,
                 is_reference: idx == reference,
             }
         })

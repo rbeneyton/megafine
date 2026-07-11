@@ -322,18 +322,48 @@ fn print_ranks(results: &[BenchmarkResult], options: &Options) {
         .filter_map(|item| item.stddev.map(|s| format!("{:.2}", s * 100.0).len()))
         .max();
 
+    // The metric's central value shown before the relative column; time-kind
+    // values share one unit so their decimal points line up down the column.
+    let kind = options.metric.kind();
+    let unit = options
+        .time_unit
+        .or_else(|| relative.iter().map(|item| auto_unit(item.center)).min());
+    let values: Vec<String> = relative
+        .iter()
+        .map(|item| format_metric(item.center, kind, unit, options.precision))
+        .collect();
+    let val_w = values.iter().map(|v| v.chars().count()).max().unwrap();
+    let spreads: Vec<Option<String>> = relative
+        .iter()
+        .map(|item| {
+            item.spread
+                .map(|s| format_metric(s, kind, unit, options.precision))
+        })
+        .collect();
+    let spread_w = spreads.iter().flatten().map(|s| s.chars().count()).max();
+
     // The duration text and optional tag width that follow each label.
     let tails: Vec<(String, usize)> = relative
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let suffix = if item.is_reference {
-                ": reference".to_string()
+            let rest = if item.is_reference {
+                "reference".to_string()
             } else {
                 // Percentage difference from the reference, with the propagated
                 // uncertainty (both in percentage points).
-                format!(": {}", relative_cell(item.ratio, item.stddev, pct_w, unc_w))
+                relative_cell(item.ratio, item.stddev, pct_w, unc_w)
             };
+            let mut suffix = format!(": {:>val_w$}", values[i]);
+            // Reserve the `± σ` segment on every row so the relative column
+            // aligns even when a single-run row has no stddev.
+            if let Some(sw) = spread_w {
+                match &spreads[i] {
+                    Some(s) => suffix.push_str(&format!(" ± {s:>sw$}")),
+                    None => suffix.push_str(&" ".repeat(3 + sw)),
+                }
+            }
+            suffix.push_str(&format!("  {rest}"));
             let tag_w = if i == fastest {
                 1 + best_tag.chars().count()
             } else if i == slowest {
