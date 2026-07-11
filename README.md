@@ -87,8 +87,8 @@ Measurement:
       --pin-reserved <NUM>  Book NUM CPUs (lowest ids) for megafine's own threads [default: 0]
 
 Parameters:
-  -L, --parameter-list <NAME> <VALUES>     Benchmark each command once per VALUE, substituting it for `{NAME}` in the command (and -n names). VALUES is a comma-separated list, or @FILE to read one value per line. Repeatable; several lists
-                                           multiply
+  -L, --parameter-list <NAME> <VALUES>     Benchmark each command once per VALUE, substituting it for `{NAME}` in the command (and -n names). VALUES is a comma-separated list (use a trailing comma for a single value: `1,`), or @FILE to
+                                           read one value per line. Repeatable; several lists multiply
   -P, --parameter-scan <NAME> <MIN> <MAX>  Benchmark each command once per value of NAME = MIN..=MAX (stepped by --parameter-step-size), substituting it for `{NAME}`
       --parameter-step-size <STEP>         Step between two consecutive --parameter-scan values [default: 1]
       --parameter-step-n <NUM>             Split each --parameter-scan MIN..=MAX into NUM equal steps (NUM+1 evenly spaced values, both endpoints included) instead of a fixed step size. Incompatible with --parameter-step-size

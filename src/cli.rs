@@ -133,8 +133,9 @@ pub struct Cli {
     pub pin_reserved: usize,
 
     /// Benchmark each command once per VALUE, substituting it for `{NAME}` in
-    /// the command (and -n names). VALUES is a comma-separated list, or @FILE
-    /// to read one value per line. Repeatable; several lists multiply.
+    /// the command (and -n names). VALUES is a comma-separated list (use a
+    /// trailing comma for a single value: `1,`), or @FILE to read one value
+    /// per line. Repeatable; several lists multiply.
     #[arg(short = 'L', long = "parameter-list", num_args = 2, value_names = ["NAME", "VALUES"], help_heading = "Parameters")]
     pub parameter_list: Vec<String>,
 

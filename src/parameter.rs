@@ -60,7 +60,18 @@ fn axes(cli: &Cli) -> Result<Vec<Axis>> {
                 values
             }
             None => {
-                let values: Vec<String> = pair[1].split(',').map(str::to_string).collect();
+                // A bare word is more likely a stray argument (`-L l 1 10`)
+                // than a one-value list, so require at least one comma.
+                if !pair[1].contains(',') {
+                    bail!(
+                        "--parameter-list {}: no comma in VALUES '{v}'; if you want \
+                         only one value you can simply add a trailing comma ('{v},')",
+                        pair[0],
+                        v = pair[1],
+                    );
+                }
+                let list = pair[1].strip_suffix(',').unwrap_or(&pair[1]);
+                let values: Vec<String> = list.split(',').map(str::to_string).collect();
                 if values.iter().any(String::is_empty) {
                     bail!("--parameter-list {} has an empty value", pair[0]);
                 }
@@ -407,6 +418,23 @@ mod tests {
     }
 
     #[test]
+    fn single_value_needs_trailing_comma() {
+        let err = expand(&cli(&["-L", "a", "1", "echo {a}"])).unwrap_err();
+        assert!(err.to_string().contains("trailing comma"), "{err}");
+    }
+
+    #[test]
+    fn trailing_comma_allows_single_value() {
+        let c = cli(&["-L", "a", "1,", "echo {a}"]);
+        let (cmds, _) = expand(&c).unwrap();
+        assert_eq!(cmds, ["echo 1"]);
+        // Also tolerated on a multi-value list.
+        let c = cli(&["-L", "a", "1,2,", "echo {a}"]);
+        let (cmds, _) = expand(&c).unwrap();
+        assert_eq!(cmds, ["echo 1", "echo 2"]);
+    }
+
+    #[test]
     fn names_are_substituted() {
         let c = cli(&["-L", "a", "1,2", "echo {a}", "-n", "run {a}"]);
         let (_, names) = expand(&c).unwrap();
@@ -415,13 +443,13 @@ mod tests {
 
     #[test]
     fn unknown_placeholder_errors() {
-        let c = cli(&["-L", "a", "1", "echo {b}"]);
+        let c = cli(&["-L", "a", "1,", "echo {b}"]);
         assert!(expand(&c).is_err());
     }
 
     #[test]
     fn shell_braces_pass_through() {
-        let c = cli(&["-L", "a", "1", "awk '{print $1}' f{a}"]);
+        let c = cli(&["-L", "a", "1,", "awk '{print $1}' f{a}"]);
         let (cmds, _) = expand(&c).unwrap();
         assert_eq!(cmds, ["awk '{print $1}' f1"]);
     }
@@ -443,6 +471,6 @@ mod tests {
             .is_err()
         );
         assert!(expand(&cli(&["-L", "a", "1,,2", "a"])).is_err());
-        assert!(expand(&cli(&["-L", "a", "1", "-L", "a", "2", "a"])).is_err());
+        assert!(expand(&cli(&["-L", "a", "1,", "-L", "a", "2,", "a"])).is_err());
     }
 }

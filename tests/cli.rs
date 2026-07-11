@@ -303,7 +303,7 @@ fn parameter_step_n_conflicts_with_step_size() {
 
 #[test]
 fn unknown_parameter_errors() {
-    let out = run(&["-L", "d", "1", "-r", "1", "--no-calibrate", "sleep {x}"]);
+    let out = run(&["-L", "d", "1,", "-r", "1", "--no-calibrate", "sleep {x}"]);
     assert!(!out.status.success());
     assert!(
         stderr(&out).contains("unknown parameter"),
