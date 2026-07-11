@@ -192,7 +192,7 @@ fn placeholder(text: &str) -> Option<&str> {
 /// repeated once per point of the axes' cross product, with each `{name}`
 /// replaced by the point's value. Commands vary slowest, then the axes in
 /// definition order.
-pub fn expand(cli: &Cli) -> Result<(Vec<String>, Vec<String>)> {
+pub fn expand(cli: &Cli) -> Result<(Vec<String>, Option<Vec<String>>)> {
     let axes = axes(cli)?;
     let mut combos: Vec<Vec<&str>> = vec![Vec::new()];
     for axis in &axes {
@@ -226,11 +226,12 @@ pub fn expand(cli: &Cli) -> Result<(Vec<String>, Vec<String>)> {
         .iter()
         .flat_map(|cmd| combos.iter().map(|combo| substitute(cmd, combo)))
         .collect();
-    let names: Vec<String> = cli
-        .command_name
-        .iter()
-        .flat_map(|name| combos.iter().map(|combo| substitute(name, combo)))
-        .collect();
+    let names: Option<Vec<String>> = cli.command_name.as_ref().map(|names| {
+        names
+            .iter()
+            .flat_map(|name| combos.iter().map(|combo| substitute(name, combo)))
+            .collect()
+    });
 
     for cmd in &commands {
         if let Some(token) = placeholder(cmd) {
@@ -438,7 +439,7 @@ mod tests {
     fn names_are_substituted() {
         let c = cli(&["-L", "a", "1,2", "echo {a}", "-n", "run {a}"]);
         let (_, names) = expand(&c).unwrap();
-        assert_eq!(names, ["run 1", "run 2"]);
+        assert_eq!(names.unwrap(), ["run 1", "run 2"]);
     }
 
     #[test]

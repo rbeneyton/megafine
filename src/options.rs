@@ -229,10 +229,11 @@ impl Options {
             bail!("--raw needs at least 2 commands (it prints relative-speed ratios)");
         }
 
-        if cli.command_name.len() > cli.commands.len() {
+        let names = cli.command_name.as_deref().unwrap_or_default();
+        if names.len() > cli.commands.len() {
             bail!(
                 "got {} command names but only {} command(s)",
-                cli.command_name.len(),
+                names.len(),
                 cli.commands.len()
             );
         }

@@ -52,13 +52,13 @@ Options:
   -V, --version  Print version
 
 Output:
-  -n, --command-name <NAME>...  Display names for the commands, in order (one per command), should be last argument
-  -u, --time-unit <UNIT>        Display time unit: us, ms or s
-      --precision <DIGITS>      Digits after the decimal point for displayed times [default: 3]
-      --estimator <ESTIMATOR>   Central-value statistic for the metric and relative ratios: mean, median, or a percentile (p90, p999 = 99.9th) [default: mean]
-      --sort <ORDER>            Row order of the ranking table: command (input order) or metric (best first) [default: command]
-      --raw                     Print only the relative-speed ratios (one per line, command order, reference = first command or --reference) on stdout, for scripts
-      --reference <IDX>         Use the IDX-th command (1-based) as the relative-speed baseline [default: the first command]
+  -n, --command-name [<NAME>...]  Display names for the commands, in order (one per command), should be last argument. Without any NAME, names are derived automatically by removing the common prefix and suffix from the commands
+  -u, --time-unit <UNIT>          Display time unit: us, ms or s
+      --precision <DIGITS>        Digits after the decimal point for displayed times [default: 3]
+      --estimator <ESTIMATOR>     Central-value statistic for the metric and relative ratios: mean, median, or a percentile (p90, p999 = 99.9th) [default: mean]
+      --sort <ORDER>              Row order of the ranking table: command (input order) or metric (best first) [default: command]
+      --raw                       Print only the relative-speed ratios (one per line, command order, reference = first command or --reference) on stdout, for scripts
+      --reference <IDX>           Use the IDX-th command (1-based) as the relative-speed baseline [default: the first command]
 
 Execution:
   -j, --jobs <JOBS>        Run JOBS command invocations simultaneously (0: auto) [default: available CPUs (16) minus --pin-reserved]
@@ -319,6 +319,8 @@ apply), or if `--no-calibrate` option is used.
   `--parameter-step-size`
 - [x] `--parameter-step-log` to space the `--parameter-step-n` steps
   geometrically (log scale) between MIN and MAX; MIN must be positive
+- [x] Bare `-n` (no NAME) derives the display names automatically by removing
+  the common prefix and suffix from the commands
 
 ### [0.1.0] 2026-06-05
 

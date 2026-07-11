@@ -125,6 +125,24 @@ fn command_name_is_shown() {
 }
 
 #[test]
+fn bare_command_name_derives_names() {
+    // Common prefix "sleep 0.0" is stripped, leaving "2" and "3" as names.
+    let out = run(&[
+        "-r",
+        "2",
+        "--no-calibrate",
+        "--no-pin",
+        "sleep 0.02",
+        "sleep 0.03",
+        "-n",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let s = stdout(&out);
+    assert!(s.contains("Benchmark 1: 2"), "stdout: {s}");
+    assert!(s.contains("Benchmark 2: 3"), "stdout: {s}");
+}
+
+#[test]
 fn rusage_extras_shown() {
     let out = run(&["-r", "2", "--no-calibrate", "--no-pin", "sleep 0.01"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));

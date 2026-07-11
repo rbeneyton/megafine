@@ -169,9 +169,11 @@ pub struct Cli {
     #[arg(long, requires = "parameter_step_n", help_heading = "Parameters")]
     pub parameter_step_log: bool,
 
-    /// Display names for the commands, in order (one per command), should be last argument.
-    #[arg(short = 'n', long = "command-name", value_name = "NAME", num_args = 1.., help_heading = "Output")]
-    pub command_name: Vec<String>,
+    /// Display names for the commands, in order (one per command), should be
+    /// last argument. Without any NAME, names are derived automatically by
+    /// removing the common prefix and suffix from the commands.
+    #[arg(short = 'n', long = "command-name", value_name = "NAME", num_args = 0.., help_heading = "Output")]
+    pub command_name: Option<Vec<String>>,
 
     /// Display time unit: us, ms or s.
     #[arg(short = 'u', long, value_name = "UNIT", help_heading = "Output")]

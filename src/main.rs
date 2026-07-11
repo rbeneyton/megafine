@@ -44,6 +44,12 @@ fn main() -> Result<()> {
     if !cli.parameter_list.is_empty() || !cli.parameter_scan.is_empty() {
         (cli.commands, cli.command_name) = parameter::expand(&cli)?;
     }
+    // A bare `-n` asks for automatic names, derived from the final commands.
+    if let Some(names) = &mut cli.command_name
+        && names.is_empty()
+    {
+        *names = command::auto_names(&cli.commands);
+    }
     let cli = cli;
 
     let options = Options::from_cli(&cli)?;
