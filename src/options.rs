@@ -90,25 +90,30 @@ pub fn all_cores() -> usize {
         .unwrap_or(1)
 }
 
-impl Options {
-    /// Parse `line` into the argv `execute` will spawn: `[shell, -c, line]`
-    /// when a shell is configured, otherwise split into words here, once.
-    pub fn invocation(&self, line: &str) -> Result<Invocation> {
-        let argv = match &self.shell {
-            None => {
-                let parts = shell_words::split(line)
-                    .with_context(|| format!("could not parse command '{line}'"))?;
-                if parts.is_empty() {
-                    bail!("empty command '{line}'");
-                }
-                parts
+/// Parse `line` into the argv `execute` will spawn: `[shell, -c, line]`
+/// when a shell is configured, otherwise split into words here, once.
+fn invocation(shell: Option<&str>, line: &str) -> Result<Invocation> {
+    let argv = match shell {
+        None => {
+            let parts = shell_words::split(line)
+                .with_context(|| format!("could not parse command '{line}'"))?;
+            if parts.is_empty() {
+                bail!("empty command '{line}'");
             }
-            Some(shell) => vec![shell.clone(), "-c".into(), line.into()],
-        };
-        Ok(Invocation {
-            line: line.to_string(),
-            argv,
-        })
+            parts
+        }
+        Some(shell) => vec![shell.to_string(), "-c".into(), line.into()],
+    };
+    Ok(Invocation {
+        line: line.to_string(),
+        argv,
+    })
+}
+
+impl Options {
+    /// Parse `line` into the argv `execute` will spawn (see `invocation`).
+    pub fn invocation(&self, line: &str) -> Result<Invocation> {
+        invocation(self.shell.as_deref(), line)
     }
 
     pub fn from_cli(cli: &Cli) -> Result<Self> {
@@ -245,7 +250,17 @@ impl Options {
             Some(n) => n - 1,
         };
 
-        let options = Options {
+        let hook = |cmd: &Option<String>| {
+            cmd.as_deref()
+                .map(|s| invocation(shell.as_deref(), s))
+                .transpose()
+        };
+        let setup = hook(&cli.setup)?;
+        let prepare = hook(&cli.prepare)?;
+        let conclude = hook(&cli.conclude)?;
+        let cleanup = hook(&cli.cleanup)?;
+
+        Ok(Options {
             jobs,
             warmup: cli.warmup,
             runs: cli.runs,
@@ -255,10 +270,10 @@ impl Options {
             timeout,
             output,
             input,
-            setup: None,
-            prepare: None,
-            conclude: None,
-            cleanup: None,
+            setup,
+            prepare,
+            conclude,
+            cleanup,
             time_unit,
             precision: cli.precision,
             estimator,
@@ -273,34 +288,6 @@ impl Options {
             sort,
             raw: cli.raw,
             reference,
-        };
-        // The hooks are parsed second: `invocation` needs the shell above.
-        let setup = cli
-            .setup
-            .as_deref()
-            .map(|s| options.invocation(s))
-            .transpose()?;
-        let prepare = cli
-            .prepare
-            .as_deref()
-            .map(|s| options.invocation(s))
-            .transpose()?;
-        let conclude = cli
-            .conclude
-            .as_deref()
-            .map(|s| options.invocation(s))
-            .transpose()?;
-        let cleanup = cli
-            .cleanup
-            .as_deref()
-            .map(|s| options.invocation(s))
-            .transpose()?;
-        Ok(Options {
-            setup,
-            prepare,
-            conclude,
-            cleanup,
-            ..options
         })
     }
 }
