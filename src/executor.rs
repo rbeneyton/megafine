@@ -108,12 +108,7 @@ impl Options {
         // child becomes its own group leader.
         let timeout = if measured { self.timeout } else { None };
         if timeout.is_some() {
-            unsafe {
-                command.pre_exec(|| match libc::setpgid(0, 0) {
-                    -1 => Err(std::io::Error::last_os_error()),
-                    _ => Ok(()),
-                });
-            }
+            command.process_group(0);
         }
 
         // With --counters the child requests tracing, so the kernel freezes it

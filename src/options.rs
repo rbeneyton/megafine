@@ -133,7 +133,7 @@ impl Options {
         };
 
         let shell = if cli.shell {
-            let ppid = unsafe { libc::getppid() };
+            let ppid = std::os::unix::process::parent_id();
             let exe = format!("/proc/{ppid}/exe");
             let exe = std::fs::read_link(&exe)
                 .with_context(|| format!("could not resolve the current shell via {exe}"))?;

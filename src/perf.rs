@@ -9,9 +9,10 @@
 //! instead would deadlock: `spawn()` itself blocks until the exec; and
 //! attaching without freezing races the exit of fast commands.)
 
-use std::io;
+use std::fs::File;
+use std::io::{self, Read};
 use std::mem;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{FromRawFd, OwnedFd};
 
 use anyhow::{Context, Result};
 
@@ -125,13 +126,13 @@ pub fn probe() -> Result<()> {
 }
 
 /// The counters attached to one child, counting since `attach`.
-pub struct Counters([OwnedFd; 4]);
+pub struct Counters([File; 4]);
 
 /// Open every counter on the freshly spawned `pid`.
 pub fn attach(pid: i32) -> io::Result<Counters> {
     let mut fds = Vec::with_capacity(EVENTS.len());
     for event in EVENTS {
-        fds.push(open(event, pid)?);
+        fds.push(File::from(open(event, pid)?));
     }
     Ok(Counters(fds.try_into().expect("one fd per event")))
 }
@@ -140,22 +141,15 @@ impl Counters {
     /// Read the counters, after the child exited.
     pub fn read(&self) -> io::Result<PerfCounts> {
         let mut values = [0u64; 4];
-        for (fd, out) in self.0.iter().zip(&mut values) {
-            let mut buf = [0u64; 3]; // value, time_enabled, time_running
-            let n = unsafe {
-                libc::read(
-                    fd.as_raw_fd(),
-                    buf.as_mut_ptr().cast(),
-                    mem::size_of_val(&buf),
-                )
-            };
-            if n != mem::size_of_val(&buf) as isize {
-                return Err(io::Error::last_os_error());
-            }
-            *out = if buf[2] > 0 {
-                (buf[0] as f64 * buf[1] as f64 / buf[2] as f64) as u64
+        for (mut fd, out) in self.0.iter().zip(&mut values) {
+            let mut buf = [0u8; 3 * 8]; // value, time_enabled, time_running
+            fd.read_exact(&mut buf)?;
+            let [value, enabled, running] =
+                std::array::from_fn(|i| u64::from_ne_bytes(buf[i * 8..][..8].try_into().unwrap()));
+            *out = if running > 0 {
+                (value as f64 * enabled as f64 / running as f64) as u64
             } else {
-                buf[0]
+                value
             };
         }
         Ok(PerfCounts {
