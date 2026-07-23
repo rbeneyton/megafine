@@ -272,10 +272,13 @@ apply), or if `--no-calibrate` option is used.
 
 ### [Unreleased]
 
-- [x] Live display: stop pushing a copy of every frame into the terminal
-  scrollback when the display is taller than the terminal (tmux archives a
-  full-screen erase into its history; the block is now overwritten line by
-  line instead)
+- [x] Live display drawn on the alternate screen (like `top`), so it never
+  reaches the terminal scrollback and survives resizes and font-size changes.
+  It used to be redrawn in place, which sprayed a copy of every frame into the
+  history whenever the display was taller than the terminal or the terminal
+  was resized mid-run
+- [x] SIGTERM/SIGHUP stop the run like Ctrl-C (results so far are printed)
+  instead of killing megafine on the alternate screen
 
 ### [0.2.0] 2026-07-12
 
