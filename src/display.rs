@@ -115,14 +115,58 @@ pub fn spawn_display(
         let mut frame = 0usize;
         let mut last_anim = Instant::now();
 
-        // Each frame is one write: erase from the block's top (where the
-        // previous frame parked the cursor) to the end of the screen, print
-        // every line, and park back at the top. Anchoring on the block's first
-        // character survives resizes: when the emulator rewraps the previous
-        // frame it moves the parked cursor with the text, whereas counting a
-        // fixed number of lines upward from below would land mid-block and
-        // leave stale rows behind.
-        let draw = |frame: usize, worker_state: &[WorkerState], counter_msgs: &[String]| {
+        // Rows the previous frame wrote on, so a shorter frame can blank the
+        // ones it no longer fills.
+        let mut painted = 0usize;
+
+        // Each frame is one write: starting from the block's top (where the
+        // previous frame parked the cursor), overwrite every line in place —
+        // each clears its own tail with EL — and park back at the top.
+        // Anchoring on the block's first character survives resizes: when the
+        // emulator rewraps the previous frame it moves the parked cursor with
+        // the text, whereas counting a fixed number of lines upward from below
+        // would land mid-block and leave stale rows behind.
+        //
+        // The block is overwritten line by line rather than erased with ED
+        // (`\x1b[J`): tmux archives a full-screen erase — one issued with the
+        // cursor at the home position — into the scrollback instead of
+        // discarding it, so a block tall enough to start on the first row
+        // would push a copy of every single frame into the terminal history.
+        // For the same reason the block never ends with a newline: the cursor
+        // stays on its last line, so a full-height block does not scroll.
+        //
+        // An empty `lines` therefore blanks the block and leaves the cursor on
+        // its first row, which is how the display tears itself down.
+        let paint = |lines: &[String], rows: usize, painted: &mut usize| {
+            let visible = lines.len().min(rows).max(1);
+            // Rows the last frame used and this one doesn't: blanked here, so
+            // they are not left behind as stale text below a shorter block.
+            let total = visible.max(*painted).min(rows);
+            let tail = &lines[lines.len().saturating_sub(visible)..];
+            let mut buf = String::from("\x1b[?25l\r");
+            for i in 0..total {
+                if i > 0 {
+                    buf.push_str("\r\n");
+                }
+                if let Some(line) = tail.get(i) {
+                    buf.push_str(line);
+                }
+                buf.push_str("\x1b[K");
+            }
+            buf.push('\r');
+            if total > 1 {
+                buf.push_str(&format!("\x1b[{}A", total - 1));
+            }
+            *painted = visible;
+            let mut out = stderr().lock();
+            let _ = out.write_all(buf.as_bytes());
+            let _ = out.flush();
+        };
+
+        let draw = |frame: usize,
+                    worker_state: &[WorkerState],
+                    counter_msgs: &[String],
+                    painted: &mut usize| {
             let (rows, cols) = term_size();
             let glyph = SPINNER[frame % SPINNER.len()];
             let mut lines: Vec<String> = Vec::with_capacity(n_lines);
@@ -145,21 +189,12 @@ pub fn spawn_display(
             // A frame taller than the screen would scroll on every redraw,
             // spraying stale copies into the scrollback; keep the tail (the
             // counters) and drop worker lines that don't fit.
-            let visible = lines.len().min(rows.saturating_sub(1)).max(1);
-            let mut buf = String::from("\x1b[?25l\r\x1b[J");
-            for line in &lines[lines.len() - visible..] {
-                buf.push_str(line);
-                buf.push('\n');
-            }
-            buf.push_str(&format!("\x1b[{visible}A"));
-            let mut out = stderr().lock();
-            let _ = out.write_all(buf.as_bytes());
-            let _ = out.flush();
+            paint(&lines, rows, painted);
         };
 
         let mut last_draw = Instant::now();
         let mut dirty = false;
-        draw(frame, &worker_state, &counter_msgs);
+        draw(frame, &worker_state, &counter_msgs, &mut painted);
 
         loop {
             // While a state change waits behind the redraw floor, wake when
@@ -182,10 +217,11 @@ pub fn spawn_display(
                     dirty = true;
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    // The cursor is parked at the block's top: erase the block
-                    // and restore the cursor.
+                    // The cursor is parked at the block's top: blank the block
+                    // and show the cursor again, so the results print over it.
+                    paint(&[], term_size().0, &mut painted);
                     let mut out = stderr().lock();
-                    let _ = out.write_all(b"\r\x1b[J\x1b[?25h");
+                    let _ = out.write_all(b"\x1b[?25h");
                     let _ = out.flush();
                     break;
                 }
@@ -199,7 +235,7 @@ pub fn spawn_display(
             if last_draw.elapsed() >= MIN_REDRAW {
                 last_draw = Instant::now();
                 dirty = false;
-                draw(frame, &worker_state, &counter_msgs);
+                draw(frame, &worker_state, &counter_msgs, &mut painted);
             }
         }
     })

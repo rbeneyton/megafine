@@ -272,6 +272,11 @@ apply), or if `--no-calibrate` option is used.
 
 ### [Unreleased]
 
+- [x] Live display: stop pushing a copy of every frame into the terminal
+  scrollback when the display is taller than the terminal (tmux archives a
+  full-screen erase into its history; the block is now overwritten line by
+  line instead)
+
 ### [0.2.0] 2026-07-12
 
 - [x] Pin the main, display and Ctrl-C handler threads to the leftover CPUs.
