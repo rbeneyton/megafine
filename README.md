@@ -267,3 +267,4 @@ apply), or if `--no-calibrate` option is used.
 - [ ] multiple slots support in region mode, to allow multiple comparison
   inside same process or subtle timings 
 - [ ] pretty progress bars when -r is specified (low priority)
+- [ ] ebpf metrics
