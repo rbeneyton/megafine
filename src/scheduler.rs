@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -26,6 +27,12 @@ struct CmdSpec {
     inv: Invocation,
 }
 
+impl Display for CmdSpec {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
 struct Task {
     cmd_idx: usize,
     warmup: bool,
@@ -35,6 +42,12 @@ struct Task {
     /// `calibration`).
     run_id: u64,
     spec: Arc<CmdSpec>,
+}
+
+impl Display for Task {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "`{}` ({})", self.spec, self.cmd_idx)
+    }
 }
 
 struct RunReport {
@@ -147,7 +160,7 @@ fn run_task(options: &Options, task: &Task) -> Result<Execution> {
     {
         options
             .execute(prepare, false, run_id)
-            .context("the prepare command failed")?;
+            .with_context(|| format!("the prepare command of task {task} failed"))?;
     }
     let execution = options.execute(&task.spec.inv, !task.calibration, run_id)?;
     if !task.calibration
@@ -155,7 +168,7 @@ fn run_task(options: &Options, task: &Task) -> Result<Execution> {
     {
         options
             .execute(conclude, false, run_id)
-            .context("the conclude command failed")?;
+            .with_context(|| format!("the conclude command of task {task} failed"))?;
     }
     Ok(execution)
 }
@@ -520,7 +533,7 @@ pub fn run_benchmarks(
                     // no '?' operator here for unicity
                     if let Err(e) = options.execute(setup, false, None) {
                         aborted = true;
-                        abort_error = Some(e.context("the setup command failed"));
+                        abort_error = Some(e.context(format!("the setup command {setup} failed")));
                         break;
                     }
                 }
@@ -683,7 +696,8 @@ pub fn run_benchmarks(
                         && let Err(e) = options.execute(cleanup, false, None)
                     {
                         aborted = true;
-                        abort_error = Some(e.context("the cleanup command failed"));
+                        abort_error =
+                            Some(e.context(format!("the cleanup command {cleanup} failed")));
                     }
                 }
 

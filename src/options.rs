@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use anyhow::{Context, Result, anyhow, bail};
 use tracing::debug;
 
@@ -49,6 +51,12 @@ pub struct Invocation {
     /// The original command line, for labels and error messages.
     pub line: String,
     pub argv: Vec<String>,
+}
+
+impl Display for Invocation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.line)
+    }
 }
 
 pub struct Options {
