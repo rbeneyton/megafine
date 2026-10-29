@@ -5,6 +5,8 @@ A multithreaded command-line benchmarking tool.
 Inspired by [hyperfine](https://crates.io/crates/hyperfine) with concurrent
 execution support, sub-timing support and specialized scheduling.
 
+![megafine demo](docs/demo.svg)
+
 ## Usage
 
 Compare 10 times 2 commands, using 2 workers:

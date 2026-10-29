@@ -14,6 +14,7 @@ readme = "README.md"
 # optional fields
 keywords = ["tuning", "benchmarking", "optimization", "multithreaded"]
 categories = ["command-line-utilities", "development-tools::profiling", "concurrency"]
+exclude = ["docs/"]
 
 [[bin]]
 name = "megafine-region-rs" # dummy --region example
